@@ -1,3 +1,5 @@
+import { resolveProviderReference } from "@/server/providers/resolver";
+import { withProviderReference } from "@/server/providers/context";
 import {
   WorkflowEntrypoint,
   type WorkflowEvent,
@@ -14,7 +16,6 @@ import {
   type QueuedCheckStats,
 } from "@/server/workflows/rankCheckPaths";
 import { pgStep } from "@/server/workflows/pgStep";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { captureServerEvent } from "@/server/lib/posthog";
 import { AppError } from "@/server/lib/errors";
 import { autumn } from "@/server/billing/autumn";
@@ -293,7 +294,28 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
     // Scope a per-request Postgres client for this workflow invocation (no-op in
     // D1 mode). The socket is reclaimed when the invocation ends, so there is
     // nothing to tear down here.
-    return withPgClient(() => this.runScoped(event, step));
+    return withPgClient(async () => {
+      let reference: Awaited<ReturnType<typeof resolveProviderReference>>;
+      try {
+        reference = await pgStep(
+          step,
+          "resolve-seo-provider",
+          SINGLE_ATTEMPT_STEP_CONFIG,
+          () =>
+            resolveProviderReference(
+              event.payload.billingCustomer.organizationId,
+            ),
+        );
+      } catch (error) {
+        await pgStep(step, "mark-failed", SINGLE_ATTEMPT_STEP_CONFIG, () =>
+          markRankCheckRunFailed({ ...event.payload, error }),
+        );
+        throw error;
+      }
+      return withProviderReference(reference, () =>
+        this.runScoped(event, step),
+      );
+    });
   }
 
   private async runScoped(
@@ -357,7 +379,6 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
       );
 
       const keywords = prepareResult.keywords;
-      const client = createDataforseoClient(billingCustomer);
 
       console.log(`[rank-check] ${runId} loaded ${keywords.length} keywords`);
 
@@ -366,7 +387,7 @@ export class RankCheckWorkflow extends WorkflowEntrypoint<
 
       try {
         const checkContext = {
-          client,
+          billingCustomer,
           keywords,
           devices,
           serpDepth,

@@ -10,6 +10,8 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { withPgClient } from "@/db";
+import { withProviderReference } from "@/server/providers/context";
+import { AppError } from "@/server/lib/errors";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { AuditRepository } from "@/server/features/audit/repositories/AuditRepository";
 import {
@@ -88,16 +90,39 @@ export class SiteAuditWorkflow extends WorkflowEntrypoint<Env, AuditParams> {
         }
       });
 
-      await runAuditPhases(step, {
-        auditId,
-        workflowInstanceId: event.instanceId,
-        billingCustomer,
-        projectId,
-        startUrl,
-        config,
-        access: await CrawlerCredentialService.openCrawlerAccess(access),
-        renderUsage,
-      });
+      const reference =
+        config.lighthouseStrategy === "none"
+          ? null
+          : await pgStep(step, "resolve-seo-provider", DB_STEP, async () => {
+              try {
+                return await (
+                  await import("@/server/providers/resolver")
+                ).resolveProviderReference(billingCustomer.organizationId);
+              } catch (error) {
+                // Native crawling remains usable without an SEO account. The paid
+                // Lighthouse phase will report its own missing-configuration state.
+                if (
+                  error instanceof AppError &&
+                  error.code === "SEO_PROVIDER_NOT_CONFIGURED"
+                )
+                  return null;
+                throw error;
+              }
+            });
+      const executePhases = async () =>
+        runAuditPhases(step, {
+          auditId,
+          workflowInstanceId: event.instanceId,
+          billingCustomer,
+          projectId,
+          startUrl,
+          config,
+          access: await CrawlerCredentialService.openCrawlerAccess(access),
+          renderUsage,
+        });
+      await (reference
+        ? withProviderReference(reference, executePhases)
+        : executePhases());
     } catch (error) {
       console.error(`Audit ${auditId} failed:`, error);
       // Workflow entrypoints run outside the server-function middleware, so

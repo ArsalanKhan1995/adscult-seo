@@ -1,13 +1,19 @@
+import { recordProviderResultSource } from "@/server/providers/result-source";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
+import { MAX_TASKS_PER_POST } from "@/shared/rank-tracking";
 import {
-  createDataforseoClient,
-  fetchAiTrackingTaskResult,
-  MAX_TASKS_PER_POST,
-  type AiTrackingAnswer,
-  type PostedAiTrackingTask,
-} from "@/server/lib/dataforseo";
-import { DataforseoChargedTaskError } from "@/server/lib/dataforseo/envelope";
-import { resolveLatestLlmModelName } from "@/server/lib/dataforseo/llm-models";
+  fetchAiAnswers,
+  postAiTasks,
+  collectAiTask,
+  fetchAiModelAnswer,
+} from "@/server/providers/ai-answers";
+import { unwrapProviderResult } from "@/server/providers/operation";
+import type {
+  AiAnswerOutcome,
+  ParsedAiAnswer,
+  PostedAiTask,
+} from "@/server/providers/contracts/ai-answer";
+import { fetchAiModelName } from "@/server/providers/ai-research";
 import { AppError, asAppError } from "@/server/lib/errors";
 import type { ErrorCode } from "@/shared/error-codes";
 import { getIsoCountryCode } from "@/shared/keyword-locations";
@@ -17,11 +23,6 @@ import {
   type AiEngine,
 } from "@/shared/ai-visibility";
 import { AiVisibilityRepository as repo } from "../repositories/AiVisibilityRepository";
-import {
-  parseDataforseoAnswer,
-  parseLlmResponseAnswer,
-  type ParsedAiAnswer,
-} from "../providers/dataforseoEvidence";
 import { aiBrands } from "./aiVisibilityConfiguration";
 import { AI_ANSWER_FAILURES } from "./aiVisibilityErrors";
 import { matchAiBrand } from "./aiVisibilityMatching";
@@ -44,8 +45,7 @@ interface AiTaskBatch {
 }
 /** One live answer. A live step mixes engines, so each task names its own. */
 type AiLiveTask = AiTask & { engine: AiEngine };
-export type AiPendingTask = PostedAiTrackingTask &
-  AiLiveTask & { attempts: number };
+export type AiPendingTask = PostedAiTask & AiLiveTask & { attempts: number };
 interface AiRunMarket {
   locationCode: number;
   languageCode: string;
@@ -68,10 +68,6 @@ const AI_RETRY_DELAY_MS = 3_000;
 
 const waitBeforeRetry = () =>
   new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Marks the run running and groups its answers into batches. Manual and
@@ -147,15 +143,17 @@ export async function postAiBatch(
   market: AiRunMarket,
   batch: AiTaskBatch,
 ): Promise<AiPendingTask[]> {
-  let posted: PostedAiTrackingTask[] = [];
+  let posted: PostedAiTask[] = [];
   // A rejected entry is logged where it is parsed.
   let error: ErrorCode = "INTERNAL_ERROR";
   try {
-    posted = await createDataforseoClient(customer).aiSearch.trackingTaskPost({
-      engine: batch.engine,
-      tasks: batch.tasks,
-      ...market,
-    });
+    posted = unwrapProviderResult(
+      await postAiTasks(customer, {
+        engine: batch.engine,
+        tasks: batch.tasks,
+        ...market,
+      }),
+    ).tasks;
   } catch (cause) {
     error = asAppError(cause)?.code ?? "INTERNAL_ERROR";
     console.warn(`[ai-visibility] ${runId} task_post failed:`, cause);
@@ -223,25 +221,24 @@ async function fetchLiveAnswers(
   customer: BillingCustomerContext,
   market: AiRunMarket,
   tasks: AiLiveTask[],
-): Promise<AiTrackingAnswer[]> {
-  let settled: PromiseSettledResult<AiTrackingAnswer>[];
+): Promise<AiAnswerOutcome[]> {
   try {
-    settled = await createDataforseoClient(customer).aiSearch.trackingLiveBatch(
-      tasks.map((task) => ({ engine: task.engine, task, ...market })),
+    const response = unwrapProviderResult(
+      await fetchAiAnswers(
+        customer,
+        tasks.map((task) => ({ engine: task.engine, task, ...market })),
+      ),
     );
-  } catch (error) {
-    settled = tasks.map(() => ({ status: "rejected", reason: error }));
+    return response.items.map((item) => item.outcome);
+  } catch (cause) {
+    const code = asAppError(cause)?.code ?? "INTERNAL_ERROR";
+    return tasks.map(() => ({
+      status: "failed",
+      code,
+      message: code,
+      retryable: false,
+    }));
   }
-  return settled.map((outcome) =>
-    outcome.status === "fulfilled"
-      ? outcome.value
-      : {
-          status: "failed",
-          message: errorMessage(outcome.reason),
-          code: asAppError(outcome.reason)?.code ?? "INTERNAL_ERROR",
-          retryable: false,
-        },
-  );
 }
 
 /**
@@ -263,34 +260,36 @@ export async function collectAiModelBatch(
     throw new AppError("INTERNAL_ERROR", `${modelSlug} has no model API batch`);
   const brands = await runBrands(runId);
   if (!brands) return;
-  const client = createDataforseoClient(customer);
-  const modelName = await resolveLatestLlmModelName(modelSlug);
+  const modelName = unwrapProviderResult(
+    await fetchAiModelName(customer, modelSlug),
+  ).modelName;
   const country = getIsoCountryCode(market.locationCode).toUpperCase();
   await Promise.all(
     batch.tasks.map(async (task) => {
       for (let attempt = 1; ; attempt++) {
         try {
-          const result = await client.aiSearch.llmResponse({
-            modelSlug,
-            modelName,
-            userPrompt: task.prompt,
-            webSearch: true,
-            // Saving the tracker rejects countries the engine cannot search.
-            webSearchCountryCode: country,
-            maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
-          });
-          await saveAiAnswer(task.tag, parseLlmResponseAnswer(result), brands);
+          const outcome = unwrapProviderResult(
+            await fetchAiModelAnswer(customer, {
+              modelSlug,
+              modelName,
+              userPrompt: task.prompt,
+              webSearch: true,
+              // Saving the tracker rejects countries the engine cannot search.
+              webSearchCountryCode: country,
+              maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS,
+            }),
+          );
+          if (outcome.status === "failed") {
+            if (outcome.retryable && attempt < AI_ANSWER_ATTEMPTS) {
+              await waitBeforeRetry();
+              continue;
+            }
+            await repo.failPendingObservations(runId, outcome.code, [task.tag]);
+            return;
+          }
+          await saveAiAnswer(task.tag, outcome.answer, brands);
           return;
         } catch (cause) {
-          // A charged task error is a task DataForSEO returned with its cost.
-          if (
-            cause instanceof DataforseoChargedTaskError &&
-            cause.code === "UPSTREAM_UNAVAILABLE" &&
-            attempt < AI_ANSWER_ATTEMPTS
-          ) {
-            await waitBeforeRetry();
-            continue;
-          }
           console.warn(
             `[ai-visibility] ${runId} answer ${task.tag} failed:`,
             cause,
@@ -323,6 +322,7 @@ export async function collectAiRound(
   runId: string,
   tasks: AiPendingTask[],
   canRetry: boolean,
+  customer: BillingCustomerContext,
 ): Promise<{ pending: AiPendingTask[]; retry: AiTaskBatch[] }> {
   const brands = await runBrands(runId);
   if (!brands) return { pending: [], retry: [] };
@@ -331,7 +331,9 @@ export async function collectAiRound(
   for (let i = 0; i < tasks.length; i += TASK_GET_CONCURRENCY) {
     const chunk = tasks.slice(i, i + TASK_GET_CONCURRENCY);
     const outcomes = await Promise.allSettled(
-      chunk.map((task) => fetchAiTrackingTaskResult(task)),
+      chunk.map((task) =>
+        collectAiTask(customer, task).then(unwrapProviderResult),
+      ),
     );
     for (const [index, outcome] of outcomes.entries()) {
       const task = chunk[index];
@@ -368,7 +370,7 @@ async function runBrands(runId: string) {
 async function saveAiOutcome(
   runId: string,
   task: { tag: string; engine: AiEngine },
-  outcome: AiTrackingAnswer,
+  outcome: AiAnswerOutcome,
   brands: AiBrand[],
 ) {
   if (outcome.status === "failed") {
@@ -378,15 +380,7 @@ async function saveAiOutcome(
     await repo.failPendingObservations(runId, outcome.code, [task.tag]);
     return;
   }
-  const answer = parseDataforseoAnswer(outcome.result, task.engine);
-  if (!answer) {
-    console.error(
-      `[ai-visibility] ${runId} answer ${task.tag} has a shape we cannot read`,
-    );
-    await repo.failPendingObservations(runId, "INTERNAL_ERROR", [task.tag]);
-    return;
-  }
-  await saveAiAnswer(task.tag, answer, brands);
+  await saveAiAnswer(task.tag, outcome.answer, brands);
 }
 
 /** Saves one answer with its citations and brand results. */
@@ -399,6 +393,7 @@ async function saveAiAnswer(
     observationId,
     values: {
       status: "completed",
+      providerResultSourceId: await recordProviderResultSource("ai.answers"),
       collectedAt: answer.collectedAt ?? new Date().toISOString(),
       answerMarkdown: answer.answerMarkdown,
       error: null,

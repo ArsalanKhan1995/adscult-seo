@@ -8,6 +8,16 @@ const mocks = vi.hoisted(() => ({
   getProjectForOrganization: vi.fn(),
   cache: new Map<string, unknown>(),
 }));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: vi.fn(async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-credentials",
+  })),
+}));
 
 vi.mock("cloudflare:workers", () => ({
   env: {},

@@ -4,7 +4,7 @@ import type {
   normalizeBacklinksTarget,
 } from "@/server/lib/dataforseo";
 import { buildBacklinksScopeFilter } from "@/server/lib/dataforseo/researchScopeFilters";
-import type { BacklinksOverviewResult } from "@/server/features/backlinks/services/backlinksOverviewSchema";
+import type { BacklinksOverviewResult } from "@/server/providers/contracts/backlinks";
 
 /**
  * The summary and history endpoints only take a whole target, so subfolder

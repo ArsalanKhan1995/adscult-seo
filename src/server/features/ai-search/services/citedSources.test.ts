@@ -4,7 +4,7 @@ import { deriveCitedSources } from "./citedSources";
 import type {
   LlmMentionItem,
   LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 
 function citedMention(
   question: string,

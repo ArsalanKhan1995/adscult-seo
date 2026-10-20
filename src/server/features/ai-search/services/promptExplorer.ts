@@ -1,8 +1,11 @@
 import { waitUntil } from "cloudflare:workers";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
-import { resolveLatestLlmModelName } from "@/server/lib/dataforseo/llm-models";
-import type { LlmResponseResult } from "@/server/lib/dataforseoLlmSchemas";
+import {
+  fetchAiResponse,
+  fetchAiModelName,
+} from "@/server/providers/ai-research";
+import { unwrapProviderResult } from "@/server/providers/operation";
+import type { LlmResponseResult } from "@/server/providers/contracts/ai-research";
 import { AppError } from "@/server/lib/errors";
 import { assertPaidAiSearchPlan } from "./access";
 import {
@@ -48,8 +51,6 @@ const PROMPT_RESPONSE_TTL_SECONDS = 7 * 24 * 60 * 60;
  */
 const PROMPT_RESPONSE_MAX_TOKENS = 4096;
 
-type DataforseoClient = ReturnType<typeof createDataforseoClient>;
-
 export async function explorePrompt(
   input: PromptExplorerInput,
   billingCustomer: BillingCustomerContext,
@@ -58,7 +59,6 @@ export async function explorePrompt(
     billingCustomer.organizationId,
     "Prompt Explorer",
   );
-  const dataforseo = createDataforseoClient(billingCustomer);
   const highlightBrand = input.highlightBrand?.trim() || null;
 
   // Dedupe models so a request like ["claude","claude"] doesn't fan out to two
@@ -72,7 +72,6 @@ export async function explorePrompt(
         input,
         highlightBrand,
         billingCustomer,
-        dataforseo,
       }),
     ),
   );
@@ -98,7 +97,6 @@ type RunModelArgs = {
   input: PromptExplorerInput;
   highlightBrand: string | null;
   billingCustomer: BillingCustomerContext;
-  dataforseo: DataforseoClient;
 };
 
 async function runModel(
@@ -122,7 +120,9 @@ async function runModel(
   }
   // Part of the cache key so a model upgrade refetches rather than serving
   // cached answers from the previous model.
-  const modelName = await resolveLatestLlmModelName(args.model);
+  const modelName = unwrapProviderResult(
+    await fetchAiModelName(args.billingCustomer, args.model),
+  ).modelName;
   const cacheKey = await buildCacheKey(AI_SEARCH_PROMPT_CACHE_NAMESPACE, {
     organizationId: args.billingCustomer.organizationId,
     projectId: args.input.projectId,
@@ -185,14 +185,14 @@ function fetchModelResponse(
   args: RunModelArgs,
   modelName: string,
 ): Promise<LlmResponseResult> {
-  return args.dataforseo.aiSearch.llmResponse({
+  return fetchAiResponse(args.billingCustomer, {
     modelSlug: args.model,
     modelName,
     userPrompt: args.input.prompt,
     webSearch: args.input.webSearch,
     webSearchCountryCode: args.input.webSearchCountryCode,
     maxOutputTokens: PROMPT_RESPONSE_MAX_TOKENS,
-  });
+  }).then((result) => unwrapProviderResult(result).response);
 }
 
 /**

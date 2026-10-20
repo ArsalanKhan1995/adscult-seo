@@ -1,5 +1,5 @@
 import { sortBy } from "remeda";
-import type { LlmCrossAggregatedItem } from "@/server/lib/dataforseoLlmSchemas";
+import type { LlmCrossAggregatedItem } from "@/server/providers/contracts/ai-research";
 import type { LlmPlatform } from "@/server/lib/dataforseo";
 import type { BrandLookupResult } from "@/types/schemas/ai-search";
 import { detectTarget } from "@/shared/targetDetection";

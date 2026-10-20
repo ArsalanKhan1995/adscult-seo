@@ -1,12 +1,19 @@
+import { AppError } from "@/server/lib/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowStep } from "cloudflare:workers";
-import type { RankCheckTaskInput } from "@/server/lib/dataforseo";
-import { runLiveCheck } from "./rankCheckPaths";
+import type { RankCheckTaskInput } from "@/server/providers/contracts/rank-check";
+import {
+  withProviderScope,
+  getScopedProviderExecution,
+} from "@/server/providers/context";
+import { runLiveCheck, runQueuedCheck } from "./rankCheckPaths";
+import { resolveProviderExecution } from "@/server/providers/resolver";
 
 const mocks = vi.hoisted(() => ({
   getSnapshotsForRun: vi.fn(),
   insertSnapshots: vi.fn(),
   updateRun: vi.fn(),
+  setRunErrorIfEmpty: vi.fn(),
   fetchRankCheckTaskResult: vi.fn(),
   rankCheckBatch: vi.fn(),
   rankCheckTaskPost: vi.fn(),
@@ -18,7 +25,15 @@ vi.mock(
 );
 vi.mock("@/server/lib/dataforseo", () => ({
   fetchRankCheckTaskResult: mocks.fetchRankCheckTaskResult,
-  MAX_TASKS_PER_POST: 100,
+  createDataforseoClient: () => ({
+    serp: {
+      rankCheckBatch: mocks.rankCheckBatch,
+      rankCheckTaskPost: mocks.rankCheckTaskPost,
+    },
+  }),
+}));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: vi.fn(),
 }));
 vi.mock("@/server/workflows/pgStep", () => ({
   pgStep: (
@@ -35,30 +50,47 @@ const keywords = Array.from({ length: 11 }, (_, index) => ({
 }));
 
 function runManualCheck() {
-  return runLiveCheck(
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only sleep is reached; pgStep is mocked
-    { sleep: vi.fn() } as unknown as WorkflowStep,
-    {
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the check paths only call these two serp methods
-      client: {
-        serp: {
-          rankCheckBatch: mocks.rankCheckBatch,
-          rankCheckTaskPost: mocks.rankCheckTaskPost,
-        },
-      } as never,
-      keywords,
-      devices: "desktop",
-      serpDepth: 10,
-      domain: "openseo.so",
-      locationCode: 2840,
-      languageCode: "en",
-      runId: "run_1",
+  // The real workflow resolves and pins its provider before parallel steps.
+  return withProviderScope("org", async () => {
+    await getScopedProviderExecution();
+    return runLiveCheck(
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only sleep is reached; pgStep is mocked
+      { sleep: vi.fn() } as unknown as WorkflowStep,
+      makeCheckContext(),
+    );
+  });
+}
+
+function makeCheckContext() {
+  return {
+    billingCustomer: {
+      organizationId: "org",
+      userId: "user",
+      userEmail: "user@example.com",
     },
-  );
+    keywords,
+    devices: "desktop" as const,
+    serpDepth: 10,
+    domain: "openseo.so",
+    locationCode: 2840,
+    languageCode: "en",
+    runId: "run_1",
+  };
 }
 
 describe("runLiveCheck", () => {
   beforeEach(() => {
+    vi.mocked(resolveProviderExecution).mockImplementation(
+      async (organizationId: string) => ({
+        organizationId,
+        provider: "dataforseo",
+        revision: 0,
+        credentialVersion: null,
+        source: "environment",
+        authorization: "test-credentials",
+      }),
+    );
+    mocks.setRunErrorIfEmpty.mockResolvedValue(undefined);
     mocks.rankCheckBatch.mockImplementation(
       async (inputs: RankCheckTaskInput[]) =>
         inputs.map((input) => ({
@@ -77,6 +109,25 @@ describe("runLiveCheck", () => {
       }),
     );
   });
+
+  it.each([
+    new AppError("SEO_PROVIDER_CONFIGURATION_UNAVAILABLE"),
+    new AppError("SEO_PROVIDER_TIMEOUT"),
+    new AppError("UPSTREAM_UNAVAILABLE"),
+    new TypeError("fetch failed"),
+    new SyntaxError("Unexpected end of JSON input"),
+  ])(
+    "does not buy another result after an uncertain queued submission: %s",
+    async (error) => {
+      mocks.rankCheckTaskPost.mockRejectedValueOnce(error);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- only sleep is used; pgStep is mocked
+      const step = { sleep: vi.fn() } as unknown as WorkflowStep;
+      const result = await runQueuedCheck(step, makeCheckContext());
+      expect(result).toMatchObject({ queueTasks: 0, fallbackTasks: 0 });
+      expect(mocks.rankCheckBatch).not.toHaveBeenCalled();
+      expect(mocks.fetchRankCheckTaskResult).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps going after a failed live batch and queues only the missing pairs", async () => {
     // The first batch step dies after its calls; the second batch saves kw_10.

@@ -1,14 +1,19 @@
 import { waitUntil } from "cloudflare:workers";
 import { identity, sortBy } from "remeda";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
 import {
-  buildLlmTarget,
+  fetchAiMetrics,
+  fetchAiPages,
+  fetchAiMentions,
+  fetchAiCrossMetrics,
+} from "@/server/providers/ai-research";
+import { unwrapProviderResult } from "@/server/providers/operation";
+import {
   CHATGPT_LANGUAGE_CODE,
   CHATGPT_LOCATION_CODE,
   type LlmPlatform,
 } from "@/server/lib/dataforseo";
-import type { LlmCrossAggregatedItem } from "@/server/lib/dataforseoLlmSchemas";
+import type { LlmCrossAggregatedItem } from "@/server/providers/contracts/ai-research";
 import { AppError } from "@/server/lib/errors";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import {
@@ -102,8 +107,6 @@ export async function getBrandLookup(
     };
   }
 
-  const dataforseo = createDataforseoClient(billingCustomer);
-
   // Settle each platform independently so a failure in one doesn't discard the
   // other. Keep the metered DataForSEO calls sequenced: in hosted mode each
   // call checks balance before execution and records spend after, so parallel
@@ -117,7 +120,7 @@ export async function getBrandLookup(
           detected,
           includeSubdomains,
           input,
-          dataforseo,
+          billingCustomer,
         ),
       ),
     );
@@ -133,7 +136,7 @@ export async function getBrandLookup(
             competitorGroups,
             includeSubdomains,
             input,
-            dataforseo,
+            billingCustomer,
           ),
         )
       : ({ status: "fulfilled", value: [] } as PromiseFulfilledResult<
@@ -224,13 +227,13 @@ async function fetchPlatformData(
   detected: ReturnType<typeof detectTarget>,
   includeSubdomains: boolean,
   input: PlatformFetchInput,
-  dataforseo: ReturnType<typeof createDataforseoClient>,
+  customer: BillingCustomerContext,
 ): Promise<PlatformBundle> {
-  const target = buildLlmTarget({
+  const target = {
     type: detected.type,
     value: detected.value,
     includeSubdomains,
-  });
+  };
 
   // ChatGPT mentions DB only contains US/en data per DataForSEO docs.
   const locationCode =
@@ -241,31 +244,31 @@ async function fetchPlatformData(
   // Settle sub-calls independently so one failure doesn't discard the others we
   // already paid for, but keep them sequenced for hosted billing checks.
   const aggregated = await settle(() =>
-    dataforseo.aiSearch.aggregatedMetrics({
+    fetchAiMetrics(customer, {
       target,
       platform,
       locationCode,
       languageCode,
       internalListLimit: 20,
-    }),
+    }).then((result) => unwrapProviderResult(result).metrics),
   );
   const topPages = await settle(() =>
-    dataforseo.aiSearch.topPages({
+    fetchAiPages(customer, {
       target,
       platform,
       locationCode,
       languageCode,
       itemsListLimit: TOP_SOURCES_PER_PLATFORM,
-    }),
+    }).then((result) => unwrapProviderResult(result).rows),
   );
   const mentions = await settle(() =>
-    dataforseo.aiSearch.mentionsSearch({
+    fetchAiMentions(customer, {
       target,
       platform,
       locationCode,
       languageCode,
       limit: MENTIONS_PER_PLATFORM,
-    }),
+    }).then((result) => unwrapProviderResult(result).rows),
   );
 
   rethrowIfBlockingAiSearchError([aggregated, topPages, mentions]);
@@ -305,24 +308,24 @@ async function fetchCrossAggregated(
   competitors: CompetitorGroup[],
   includeSubdomains: boolean,
   input: PlatformFetchInput,
-  dataforseo: ReturnType<typeof createDataforseoClient>,
+  customer: BillingCustomerContext,
 ): Promise<CrossOutcome[]> {
   const groups = [
     {
       key: detected.value,
-      target: buildLlmTarget({
+      target: {
         type: detected.type,
         value: detected.value,
         includeSubdomains,
-      }),
+      },
     },
     ...competitors.map((competitor) => ({
       key: competitor.label,
-      target: buildLlmTarget({
+      target: {
         type: competitor.detected.type,
         value: competitor.detected.value,
         includeSubdomains,
-      }),
+      },
     })),
   ];
 
@@ -330,7 +333,7 @@ async function fetchCrossAggregated(
   for (const platform of PLATFORMS) {
     settled.push(
       await settle(() =>
-        dataforseo.aiSearch.crossAggregatedMetrics({
+        fetchAiCrossMetrics(customer, {
           groups,
           platform,
           // ChatGPT mentions DB only contains US/en data per DataForSEO docs.
@@ -342,7 +345,7 @@ async function fetchCrossAggregated(
             platform === "chat_gpt"
               ? CHATGPT_LANGUAGE_CODE
               : input.languageCode,
-        }),
+        }).then((result) => unwrapProviderResult(result).rows),
       ),
     );
   }

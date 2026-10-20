@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildKeywordFilters } from "@/server/features/domain/services/domainKeywordFilters";
+import { buildKeywordFilters } from "@/server/providers/dataforseo/domain-keyword-filters";
 
 describe("buildKeywordFilters", () => {
   // Include terms are ANDed here (every term must match), unlike the

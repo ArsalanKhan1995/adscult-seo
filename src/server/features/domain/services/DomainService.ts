@@ -3,9 +3,11 @@ import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import type { CreditFeature } from "@/shared/billing-credit-features";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
-import { buildRankedKeywordsScopeFilter } from "@/server/lib/dataforseo/researchScopeFilters";
-import { joinClauses } from "@/server/lib/dataforseo/filters";
+import {
+  fetchDomainOverview,
+  fetchDomainKeywords,
+} from "@/server/providers/domain";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { parseResearchTargetOrThrow } from "@/server/lib/domainUtils";
 import type { ResearchScope } from "@/shared/researchScope";
 import { mapKeywordItem } from "@/server/features/domain/services/domainKeywordMapper";
@@ -73,26 +75,12 @@ async function getOverview(
     };
   }
 
-  const nowIso = new Date().toISOString();
-  const dataforseo = createDataforseoClient(billingCustomer);
-
-  const metricsResponse = await dataforseo.domain.rankOverview({
-    target: domain,
-    locationCode: input.locationCode,
-    languageCode: input.languageCode,
+  const response = await fetchDomainOverview(billingCustomer, {
+    ...input,
     ...metering,
   });
-
-  const metrics = metricsResponse[0];
-
-  const organicTraffic =
-    metrics?.metrics?.organic?.etv != null
-      ? Math.round(metrics.metrics.organic.etv)
-      : null;
-  const organicKeywords =
-    metrics?.metrics?.organic?.count != null
-      ? Math.round(metrics.metrics.organic.count)
-      : null;
+  const metrics = unwrapProviderResult(response);
+  const { organicTraffic, organicKeywords } = metrics;
 
   const stored: z.infer<typeof domainOverviewResultSchema> = {
     domain,
@@ -101,7 +89,7 @@ async function getOverview(
     backlinks: null,
     referringDomains: null,
     hasData: organicKeywords != null && organicKeywords > 0,
-    fetchedAt: nowIso,
+    fetchedAt: response.meta.fetchedAt,
   };
 
   if (stored.hasData) {
@@ -141,7 +129,6 @@ async function getSuggestedKeywords(
   }>
 > {
   const target = parseResearchTargetOrThrow(input.domain, input.scope);
-  const scopeFilter = buildRankedKeywordsScopeFilter(target);
 
   const cacheKey = await buildCacheKey("domain:keyword-suggestions", {
     organizationId: billingCustomer.organizationId,
@@ -170,27 +157,20 @@ async function getSuggestedKeywords(
     return cached.data;
   }
 
-  const dataforseo = createDataforseoClient(billingCustomer);
-
-  const rankedKeywordsResponse = await dataforseo.domain.rankedKeywords({
-    target: target.hostname,
-    locationCode: input.locationCode,
-    languageCode: input.languageCode,
-    limit: 100,
-    orderBy: ["ranked_serp_element.serp_item.etv,desc"],
-    filters:
-      scopeFilter.clauses.length > 0
-        ? joinClauses(scopeFilter.clauses, "and")
-        : undefined,
-    ...metering,
-  });
+  const rankedKeywordsResponse = unwrapProviderResult(
+    await fetchDomainKeywords(billingCustomer, {
+      ...input,
+      limit: 100,
+      offset: 0,
+      sortMode: "traffic",
+      sortOrder: "desc",
+      filters: {},
+      ...metering,
+    }),
+  );
 
   const keywords = rankedKeywordsResponse.items
     .map((item) => mapKeywordItem(item))
-    .filter(
-      (item): item is NonNullable<ReturnType<typeof mapKeywordItem>> =>
-        item != null,
-    )
     .map((item) => ({
       keyword: item.keyword,
       position: item.position,

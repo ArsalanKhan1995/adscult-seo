@@ -1,11 +1,16 @@
 import { z } from "zod";
 
+export interface AiResearchTarget {
+  type: "domain" | "keyword";
+  value: string;
+  includeSubdomains?: boolean;
+  searchScope?: string[];
+  matchType?: "word_match" | "partial_match";
+}
+
 /**
- * Zod schemas for DataForSEO AI Optimization endpoints.
- *
- * The DataForSEO SDK does not yet ship typed bindings for `/ai_optimization/*`,
- * so we POST raw JSON and validate the responses ourselves. All schemas use
- * `.passthrough()` to tolerate fields the API may add in future versions.
+ * AI result schemas retain the established public field names and strip
+ * unconsumed vendor additions, including nested fields.
  */
 
 // ---------------------------------------------------------------------------
@@ -18,7 +23,7 @@ const monthlyVolumeSchema = z
     month: z.number().int().min(1).max(12),
     search_volume: z.number().nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 const mentionSourceSchema = z
   .object({
@@ -26,13 +31,13 @@ const mentionSourceSchema = z
     title: z.string().nullable().optional(),
     domain: z.string().nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 const brandEntitySchema = z
   .object({
     title: z.string().nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 // ---------------------------------------------------------------------------
 // LLM Mentions Search — `/v3/ai_optimization/llm_mentions/search/live`
@@ -51,7 +56,7 @@ export const llmMentionItemSchema = z
     last_response_at: z.string().nullable().optional(),
     brand_entities: z.array(brandEntitySchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export type LlmMentionItem = z.infer<typeof llmMentionItemSchema>;
 
@@ -68,13 +73,13 @@ const groupElementSchema = z
     ai_search_volume: z.number().nullable().optional(),
     impressions: z.number().nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export const llmAggregatedTotalSchema = z
   .object({
     platform: z.array(groupElementSchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export type LlmAggregatedTotal = z.infer<typeof llmAggregatedTotalSchema>;
 
@@ -88,14 +93,14 @@ export const llmTopPagesItemSchema = z
     key: z.string().nullable().optional(),
     platform: z.array(groupElementSchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export type LlmTopPagesItem = z.infer<typeof llmTopPagesItemSchema>;
 
 // ---------------------------------------------------------------------------
 // LLM Mentions Cross-Aggregated Metrics — `/v3/ai_optimization/llm_mentions/cross_aggregated_metrics/live`
 // One item per requested aggregation group (target + competitors).
-// `.passthrough()` because the real item also carries location, language,
+// `.strip()` because the real item also carries location, language,
 // sources_domain, and brand_entities arrays we intentionally ignore.
 // ---------------------------------------------------------------------------
 
@@ -107,7 +112,7 @@ export const llmCrossAggregatedItemSchema = z
     key: z.string().nullable().optional(),
     platform: z.array(groupElementSchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export type LlmCrossAggregatedItem = z.infer<
   typeof llmCrossAggregatedItemSchema
@@ -124,7 +129,7 @@ const responseAnnotationSchema = z
     title: z.string().nullable().optional(),
     url: z.string().nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 const responseSectionSchema = z
   .object({
@@ -132,14 +137,14 @@ const responseSectionSchema = z
     text: z.string().nullable().optional(),
     annotations: z.array(responseAnnotationSchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 const responseItemSchema = z
   .object({
     type: z.string().nullable().optional(),
     sections: z.array(responseSectionSchema).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export const llmResponseResultSchema = z
   .object({
@@ -149,6 +154,6 @@ export const llmResponseResultSchema = z
     items: z.array(responseItemSchema).nullable().optional(),
     fan_out_queries: z.array(z.string()).nullable().optional(),
   })
-  .passthrough();
+  .strip();
 
 export type LlmResponseResult = z.infer<typeof llmResponseResultSchema>;

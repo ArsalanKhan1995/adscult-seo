@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { load } from "cheerio";
 import { expect, it, vi } from "vitest";
-import { mapBacklinksRows } from "@/server/features/backlinks/services/backlinksRowMappers";
+import { mapBacklinksRows } from "@/server/providers/dataforseo/backlinks-mappers";
 import { BacklinksTable } from "./BacklinksTable";
 
 it("distinguishes zero from missing spam scores without changing boundary values", () => {

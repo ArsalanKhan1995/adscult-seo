@@ -5,6 +5,16 @@ const createDataforseoClientMock = vi.hoisted(() => vi.fn());
 vi.mock("@/server/lib/dataforseo", () => ({
   createDataforseoClient: createDataforseoClientMock,
 }));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-credentials",
+  }),
+}));
 
 vi.mock("@/server/lib/r2", () => ({
   putTextToR2: vi.fn(),
@@ -118,6 +128,6 @@ describe("fetchLighthouseResult", () => {
     );
 
     expect(live).toHaveBeenCalledOnce();
-    expect(fetched.result.errorMessage).toBe("temporary failure");
+    expect(fetched.result.errorMessage).toBe("UPSTREAM_UNAVAILABLE");
   });
 });

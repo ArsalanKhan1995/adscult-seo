@@ -22,7 +22,7 @@ import {
   type RunRow,
 } from "../repositories/AiVisibilityRepository";
 import type { ObservationWithPrompt } from "../repositories/AiVisibilityRepository";
-import { markdownToText } from "../providers/dataforseoEvidence";
+import { markdownToText } from "@/server/providers/dataforseo/ai-evidence";
 import { AiVisibilityError, publicAiAnswerError } from "./aiVisibilityErrors";
 import {
   aiBrandNames,
@@ -247,7 +247,11 @@ export async function loadAiFullAnswers(input: AiResultsInput) {
           ),
         )
     : [];
-  return { result, answers };
+  const provenance = await repo.getResultSources(
+    input.projectId,
+    answers.map((answer) => answer.observation.id),
+  );
+  return { result, answers, provenance };
 }
 
 function answerView(

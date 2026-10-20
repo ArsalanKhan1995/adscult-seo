@@ -393,6 +393,27 @@
       "when": 1791953918935,
       "tag": "0055_chief_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1792438219586,
+      "tag": "0056_absurd_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1792446833188,
+      "tag": "0057_friendly_jetstream",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1792447544287,
+      "tag": "0058_magical_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

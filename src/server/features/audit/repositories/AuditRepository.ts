@@ -1,3 +1,4 @@
+import { recordProviderResultSource } from "@/server/providers/result-source";
 /**
  * Data access layer for site audit tables.
  * Provider-aware (D1 or Postgres) via the `@/db` handle. Covers audits,
@@ -202,6 +203,8 @@ async function insertLighthouseResults(
   auditId: string,
   lighthouseResults: LighthouseResult[],
 ) {
+  const providerResultSourceId =
+    await recordProviderResultSource("audit.lighthouse");
   const rows = await Promise.all(
     lighthouseResults.map(async (result) => ({
       id: await deterministicAuditRowId(
@@ -210,6 +213,7 @@ async function insertLighthouseResults(
         result.strategy,
       ),
       auditId,
+      providerResultSourceId,
       pageId: result.pageId,
       strategy: result.strategy,
       performanceScore: result.performanceScore,

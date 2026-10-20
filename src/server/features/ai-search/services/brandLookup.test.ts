@@ -50,7 +50,7 @@ import { brandLookupSearchSchema } from "@/types/schemas/ai-search";
 import type {
   LlmMentionItem,
   LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 
 const billingCustomer: BillingCustomerContext = {
@@ -228,3 +228,14 @@ function topPage(
     platform: [{ key: platform, mentions, ai_search_volume: aiSearchVolume }],
   };
 }
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));

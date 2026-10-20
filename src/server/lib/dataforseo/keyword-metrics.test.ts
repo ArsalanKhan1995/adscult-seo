@@ -16,6 +16,58 @@ function fakeClient(overrides: {
 }
 
 describe("fetchKeywordMetricsForList", () => {
+  it("preserves input order, duplicate keywords and omitted metrics", async () => {
+    const rows = await fetchKeywordMetricsForList(
+      fakeClient({
+        keywordOverview: vi.fn().mockResolvedValue([
+          { keyword: "tea", keyword_info: { search_volume: 0 } },
+          { keyword: "coffee", keyword_info: { search_volume: 50 } },
+        ]),
+      }),
+      {
+        keywords: ["Coffee", "missing", "tea", "Coffee"],
+        locationCode: 2840,
+        languageCode: "en",
+        creditFeature: "keyword_research",
+      },
+    );
+    expect(
+      rows.map(({ keyword, searchVolume }) => ({ keyword, searchVolume })),
+    ).toEqual([
+      { keyword: "Coffee", searchVolume: 50 },
+      { keyword: "missing", searchVolume: null },
+      { keyword: "tea", searchVolume: 0 },
+      { keyword: "Coffee", searchVolume: 50 },
+    ]);
+  });
+  it("keeps unknown monthly volume distinct from measured zero and omits undated points", async () => {
+    const rows = await fetchKeywordMetricsForList(
+      fakeClient({
+        keywordOverview: vi.fn().mockResolvedValue([
+          {
+            keyword: "coffee",
+            keyword_info: {
+              monthly_searches: [
+                { year: 2026, month: 1 },
+                { year: 2026, month: 2, search_volume: 0 },
+                { search_volume: 10 },
+              ],
+            },
+          },
+        ]),
+      }),
+      {
+        keywords: ["coffee"],
+        locationCode: 2840,
+        languageCode: "en",
+        creditFeature: "keyword_research",
+      },
+    );
+    expect(rows[0].monthlySearches).toEqual([
+      { year: 2026, month: 1, searchVolume: null },
+      { year: 2026, month: 2, searchVolume: 0 },
+    ]);
+  });
   it("normalizes Labs items and prefers clickstream-refined volume/trend", async () => {
     const keywordOverview = vi.fn().mockResolvedValue([
       {
@@ -124,8 +176,12 @@ describe("fetchKeywordMetricsForList", () => {
     expect(adsSearchVolume).toHaveBeenCalledWith(
       expect.objectContaining({ keywords: ["hotel reykjavik"] }),
     );
-    // Rejected keywords get empty metrics, so a refresh clears stale values.
+    // Every input gets a row, so absent and rejected metrics clear stale values.
     expect(rows).toEqual([
+      expect.objectContaining({
+        keyword: "hotel reykjavik",
+        searchVolume: null,
+      }),
       expect.objectContaining({ keyword: "hotel (cheap)", searchVolume: null }),
       expect.objectContaining({ keyword: "best hotel?", searchVolume: null }),
     ]);

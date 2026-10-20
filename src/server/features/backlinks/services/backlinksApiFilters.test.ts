@@ -9,7 +9,7 @@ import {
   buildBacklinksRowsApiFilters,
   buildReferringDomainsApiFilters,
   buildTopPagesApiFilters,
-} from "./backlinksApiFilters";
+} from "@/server/providers/dataforseo/backlinks-filters";
 
 describe("buildBacklinksRowsApiFilters", () => {
   it("ORs include terms in one group and ANDs everything else", () => {

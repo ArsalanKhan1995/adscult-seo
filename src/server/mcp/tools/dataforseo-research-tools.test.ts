@@ -1,7 +1,6 @@
 /* eslint-disable max-lines, max-lines-per-function -- every DataForSEO research tool is covered in this one spec, matching dataforseo-research-tools.ts */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import type { fetchKeywordMetricsForList as FetchKeywordMetricsForList } from "@/server/lib/dataforseo/keyword-metrics";
 import * as researchTools from "./dataforseo-research-tools";
 import { makeToolContext, textContent } from "./tool-test-support";
 
@@ -14,17 +13,19 @@ vi.mock("cloudflare:workers", () => ({
   env: {},
 }));
 
-// Keep the real fetchKeywordMetricsForList (it only routes provider calls onto
-// the supplied client) so the handler's normalization is exercised end-to-end.
-vi.mock("@/server/lib/dataforseo", async () => {
-  const keywordMetrics = await vi.importActual<{
-    fetchKeywordMetricsForList: typeof FetchKeywordMetricsForList;
-  }>("@/server/lib/dataforseo/keyword-metrics");
-  return {
-    createDataforseoClient: mocks.createDataforseoClient,
-    fetchKeywordMetricsForList: keywordMetrics.fetchKeywordMetricsForList,
-  };
-});
+vi.mock("@/server/lib/dataforseo", () => ({
+  createDataforseoClient: mocks.createDataforseoClient,
+}));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
   ProjectService: {
@@ -399,6 +400,35 @@ describe("get_ranked_keywords scope handling", () => {
     mocks.createDataforseoClient.mockReturnValue({
       domain: { rankedKeywords },
     });
+  });
+
+  it("keeps the ranked keyword API shape without returning arbitrary upstream fields", async () => {
+    rankedKeywords.mockResolvedValueOnce({
+      items: [
+        {
+          keyword_data: {
+            keyword: "coffee",
+            keyword_info: { search_volume: 0 },
+            private_payload: "do not expose",
+          },
+          ranked_serp_element: {
+            serp_item: { rank_absolute: 4, rank_group: 2 },
+          },
+          unrelated_vendor_data: "do not expose",
+        },
+      ],
+      totalCount: 1,
+    });
+    const result = await researchTools.getRankedKeywordsTool.handler(
+      { projectId: "project_1", target: "acmeexample.com" },
+      toolContext,
+    );
+    expect(result.structuredContent.keywords[0]).toMatchObject({
+      keyword_data: { keyword: "coffee", keyword_info: { search_volume: 0 } },
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toMatch(
+      /private_payload|unrelated_vendor_data|do not expose/,
+    );
   });
 
   it("passes only explicit brand exclusions to ranked keyword filters", async () => {

@@ -1,3 +1,13 @@
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
 import { beforeEach, expect, it, vi } from "vitest";
 
 const backlinksSummaryMock = vi.fn();

@@ -1,19 +1,16 @@
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
+import { fetchDomainKeywords } from "@/server/providers/domain";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import { parseResearchTargetOrThrow } from "@/server/lib/domainUtils";
-import { buildRankedKeywordsScopeFilter } from "@/server/lib/dataforseo/researchScopeFilters";
 import type { ResearchScope } from "@/shared/researchScope";
 import { mapKeywordItem } from "@/server/features/domain/services/domainKeywordMapper";
-import { computeHasMore } from "@/server/features/domain/services/pagination";
 import {
-  buildKeywordFilters,
-  buildOrderBy,
   type DomainKeywordsSortMode,
   type DomainKeywordsSortOrder,
-} from "@/server/features/domain/services/domainKeywordFilters";
+} from "@/server/providers/contracts/domain";
 import type { DomainKeywordsFilters } from "@/types/schemas/domain";
 
 const DOMAIN_KEYWORDS_PAGE_TTL_SECONDS = 12 * 60 * 60;
@@ -58,10 +55,7 @@ export async function getKeywordsPage(
   billingCustomer: BillingCustomerContext,
 ): Promise<DomainKeywordsPageResult> {
   const target = parseResearchTargetOrThrow(input.domain, input.scope);
-  const scopeFilter = buildRankedKeywordsScopeFilter(target);
   const offset = (input.page - 1) * input.pageSize;
-  const orderBy = buildOrderBy(input.sortMode, input.sortOrder);
-  const filters = buildKeywordFilters(input.filters, input.search, scopeFilter);
 
   const cacheKey = await buildCacheKey("domain:keywords-page", {
     organizationId: billingCustomer.organizationId,
@@ -85,31 +79,15 @@ export async function getKeywordsPage(
     return cached.data;
   }
 
-  const dataforseo = createDataforseoClient(billingCustomer);
-  const response = await dataforseo.domain.rankedKeywords({
-    target: target.hostname,
-    locationCode: input.locationCode,
-    languageCode: input.languageCode,
-    limit: input.pageSize,
-    offset,
-    orderBy,
-    filters: filters.length > 0 ? filters : undefined,
-  });
-
-  const keywords = response.items
-    .map((item) => mapKeywordItem(item))
-    .filter(
-      (item): item is NonNullable<ReturnType<typeof mapKeywordItem>> =>
-        item != null,
-    );
-
-  const totalCount = response.totalCount;
-  const hasMore = computeHasMore(
-    offset,
-    response.items.length,
-    totalCount,
-    input.pageSize,
+  const response = unwrapProviderResult(
+    await fetchDomainKeywords(billingCustomer, {
+      ...input,
+      limit: input.pageSize,
+      offset,
+    }),
   );
+  const keywords = response.items.map(mapKeywordItem);
+  const { totalCount, hasMore } = response;
 
   const result: DomainKeywordsPageResult = {
     domain: target.hostname,

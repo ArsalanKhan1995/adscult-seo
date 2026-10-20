@@ -4,7 +4,7 @@ import {
   resolveCompetitorGroups,
   type CrossOutcome,
 } from "./shareOfVoice";
-import type { LlmCrossAggregatedItem } from "@/server/lib/dataforseoLlmSchemas";
+import type { LlmCrossAggregatedItem } from "@/server/providers/contracts/ai-research";
 
 function crossItem(
   key: string,

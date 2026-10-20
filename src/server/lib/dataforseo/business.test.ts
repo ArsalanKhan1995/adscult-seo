@@ -35,6 +35,24 @@ const okTask = (path: string[], result: unknown[]) => ({
 });
 
 describe("Google business_data fetchers", () => {
+  it.each([
+    [40100, "DATAFORSEO_AUTH_FAILED"],
+    [40200, "SEO_PROVIDER_QUOTA_EXCEEDED"],
+    [40101, "UPSTREAM_UNAVAILABLE"],
+  ])(
+    "classifies a failed collected task (%s) without exposing vendor text",
+    async (status, code) => {
+      stubDataforseo({
+        status_code: 20000,
+        tasks: [
+          { status_code: status, status_message: "private upstream detail" },
+        ],
+      });
+      await expect(
+        fetchBusinessDataTaskResult({ endpoint: "reviews", taskId: "task-1" }),
+      ).rejects.toMatchObject({ code, message: code });
+    },
+  );
   it("sends a coordinate for my_business_info and returns the single item", async () => {
     const fetchMock = stubDataforseo(
       okTask(

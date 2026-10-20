@@ -17,6 +17,8 @@ import * as sqliteGa4 from "./ga4.schema";
 import * as sqliteGsc from "./gsc.schema";
 import * as sqliteTelemetry from "./telemetry.schema";
 import * as sqliteAiVisibility from "./ai-visibility.schema";
+import * as sqliteSeoProviders from "./seo-provider.schema";
+import * as pgSeoProviders from "./pg/seo-provider.schema";
 import * as pgApp from "./pg/app.schema";
 import * as pgProjectContext from "./pg/project-context.schema";
 import * as pgReports from "./pg/reports.schema";
@@ -162,6 +164,7 @@ const sqliteAppTables = tablesFrom(
   sqliteGsc,
   sqliteTelemetry,
   sqliteAiVisibility,
+  sqliteSeoProviders,
 );
 const pgAppTables = tablesFrom(
   pgApp,
@@ -175,6 +178,7 @@ const pgAppTables = tablesFrom(
   pgGsc,
   pgTelemetry,
   pgAiVisibility,
+  pgSeoProviders,
 );
 const sqliteAuthTables = tablesFrom(sqliteAuth);
 const pgAuthTables = tablesFrom(pgAuth);

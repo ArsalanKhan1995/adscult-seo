@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   customerHasPaidPlan: vi.fn(),
   beginRankCheckRun: vi.fn(),
   createDataforseoClient: vi.fn(),
-  fetchKeywordMetricsForList: vi.fn(),
+  keywordOverview: vi.fn(),
 }));
 
 // These tests cover normal scheduling, not the temporary pause.
@@ -35,7 +35,17 @@ vi.mock("@/server/features/rank-tracking/services/rankCheckRunGuards", () => ({
 }));
 vi.mock("@/server/lib/dataforseo", () => ({
   createDataforseoClient: mocks.createDataforseoClient,
-  fetchKeywordMetricsForList: mocks.fetchKeywordMetricsForList,
+}));
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
 }));
 
 const config = {
@@ -295,19 +305,25 @@ describe("RankTrackingService management invariants", () => {
       ),
     ).rejects.toMatchObject({ code: "PAYMENT_REQUIRED" });
     expect(mocks.createDataforseoClient).not.toHaveBeenCalled();
-    expect(mocks.fetchKeywordMetricsForList).not.toHaveBeenCalled();
+    expect(mocks.keywordOverview).not.toHaveBeenCalled();
   });
 
   it("matches metrics back to a cased keyword and its lowercase twin", async () => {
     mocks.isHostedServerAuthMode.mockResolvedValue(false);
-    mocks.createDataforseoClient.mockReturnValue({});
     mocks.getKeywordsForConfig.mockResolvedValue([
       { id: "kw_1", keyword: "Nodex" },
       { id: "kw_2", keyword: "nodex" },
     ]);
+    mocks.createDataforseoClient.mockReturnValue({
+      labs: { keywordOverview: mocks.keywordOverview },
+    });
     // DataForSEO echoes keywords back lowercased.
-    mocks.fetchKeywordMetricsForList.mockResolvedValue([
-      { keyword: "nodex", searchVolume: 90, keywordDifficulty: 12, cpc: 0.5 },
+    mocks.keywordOverview.mockResolvedValue([
+      {
+        keyword: "nodex",
+        keyword_info: { search_volume: 90, cpc: 0.5 },
+        keyword_properties: { keyword_difficulty: 12 },
+      },
     ]);
 
     await expect(
@@ -317,8 +333,7 @@ describe("RankTrackingService management invariants", () => {
         billingCustomer,
       ),
     ).resolves.toEqual({ updated: 2 });
-    expect(mocks.fetchKeywordMetricsForList).toHaveBeenCalledWith(
-      {},
+    expect(mocks.keywordOverview).toHaveBeenCalledWith(
       expect.objectContaining({ keywords: ["nodex"] }),
     );
     expect(mocks.updateKeywordMetrics).toHaveBeenCalledWith([

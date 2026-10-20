@@ -11,7 +11,7 @@ import {
   type LlmMentionItem,
   type LlmResponseResult,
   type LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 import { createDataforseoBillingClassifier } from "@/server/lib/dataforseoBillingClassification";
 import { AppError } from "@/server/lib/errors";
 import { dataforseoPost } from "@/server/lib/dataforseo/core";

@@ -3,7 +3,7 @@ import type { LlmPlatform } from "@/server/lib/dataforseo";
 import type {
   LlmMentionItem,
   LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 import { safeHostname, safeHttpUrl } from "@/shared/safe-url";
 import { roundOrNull } from "@/server/features/ai-search/services/shareOfVoice";
 import type { BrandLookupResult } from "@/types/schemas/ai-search";

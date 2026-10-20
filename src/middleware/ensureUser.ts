@@ -1,3 +1,4 @@
+import { withProviderScope } from "@/server/providers/context";
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { resolveUserContextFromHeaders } from "@/middleware/ensure-user/resolve";
@@ -39,10 +40,12 @@ export const ensureUserMiddleware = createMiddleware({
     }
   }
 
-  return next({
-    context: {
-      ...context,
-      project,
-    },
-  });
+  return withProviderScope(context.organizationId, () =>
+    next({
+      context: {
+        ...context,
+        project,
+      },
+    }),
+  );
 });

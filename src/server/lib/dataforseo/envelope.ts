@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AppError } from "@/server/lib/errors";
 import type { DataforseoErrorClassifier } from "@/server/lib/dataforseo/core";
 import type { ErrorCode } from "@/shared/error-codes";
+import { dataforseoAccountErrorCode } from "@/server/providers/dataforseo/account-error";
 
 // ---------------------------------------------------------------------------
 // Billing envelope — the load-bearing seam that carries each call's USD cost
@@ -194,9 +195,10 @@ export function failedResponseError<T extends DataforseoTaskLike>(
 ): AppError {
   const message = response?.status_message || fallbackMessage;
   return new AppError(
-    isUpstreamFailureStatus(response?.status_code)
-      ? "UPSTREAM_UNAVAILABLE"
-      : "INTERNAL_ERROR",
+    dataforseoAccountErrorCode(response?.status_code) ??
+      (isUpstreamFailureStatus(response?.status_code)
+        ? "UPSTREAM_UNAVAILABLE"
+        : "INTERNAL_ERROR"),
     message,
   );
 }
@@ -284,7 +286,10 @@ export function assertOk<T extends DataforseoTaskLike>(
 
     const message = task.status_message || "DataForSEO task failed";
     const path = classifyPath ?? (task.path ? `/${task.path.join("/")}` : "");
-    const classified = classify?.(task.status_code, message, path);
+    const accountCode = dataforseoAccountErrorCode(task.status_code);
+    const classified =
+      classify?.(task.status_code, message, path) ??
+      (accountCode ? new AppError(accountCode) : null);
     if (classified) throw classified;
 
     const detailedMessage = describeInvalidField(message, task);

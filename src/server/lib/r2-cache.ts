@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { sortBy } from "remeda";
+import { getScopedProviderExecution } from "@/server/providers/context";
 
 /**
  * Cache TTL constants in seconds.
@@ -25,7 +26,22 @@ export function cacheObjectPrefix(namespace: string): string {
 export async function buildCacheKey(
   prefix: string,
   params: Record<string, unknown>,
+  options: { seoProvider?: boolean } = {},
 ): Promise<string> {
+  const execution =
+    options.seoProvider === false
+      ? undefined
+      : await getScopedProviderExecution();
+  if (execution) {
+    params = {
+      ...params,
+      seoProviderScope: execution.organizationId,
+      seoProvider: execution.provider,
+      seoUpstream: "dataforseo",
+      seoRevision: execution.revision,
+      seoContractVersion: 1,
+    };
+  }
   const raw = JSON.stringify(
     Object.fromEntries(sortBy(Object.entries(params), ([key]) => key)),
   );

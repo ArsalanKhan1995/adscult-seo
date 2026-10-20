@@ -1,4 +1,5 @@
 import { AuthRepository } from "@/server/auth/repositories/AuthRepository";
+import { withProviderScope } from "@/server/providers/context";
 import { ProjectService } from "@/server/features/projects/services/ProjectService";
 import { AppError } from "@/server/lib/errors";
 import { buildBillingCustomer, type ToolContext } from "@/server/mcp/context";
@@ -76,6 +77,8 @@ export function withMcpProjectAuth<TArgs extends ProjectScopedArgs, TResult>(
 ) {
   return async (args: TArgs, toolContext: ToolContext) => {
     const context = await requireProjectAccess(toolContext, args.projectId);
-    return handler(args, context);
+    return withProviderScope(context.auth.organizationId, () =>
+      handler(args, context),
+    );
   };
 }

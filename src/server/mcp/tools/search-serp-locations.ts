@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { fetchSerpLocationsForCountry } from "@/server/lib/dataforseo/serp-locations";
+import { fetchSearchLocations } from "@/server/providers/search-locations";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { optionalMetaOutputSchema } from "@/server/mcp/output-schemas";
 import { rankSerpLocations } from "@/shared/serp-location-search";
@@ -42,7 +43,9 @@ export const searchSerpLocationsTool = {
     },
   },
   handler: async (args: Args) => {
-    const all = await fetchSerpLocationsForCountry(args.countryCode);
+    const { locations: all } = unwrapProviderResult(
+      await fetchSearchLocations(args.countryCode),
+    );
     const locations = rankSerpLocations(args.query, all, args.countryCode).map(
       (location) => ({
         locationName: location.locationName,

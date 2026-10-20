@@ -6,19 +6,11 @@
 export { createDataforseoClient } from "@/server/lib/dataforseo/client";
 
 export {
-  fetchKeywordMetricsForList,
-  type KeywordMetricRow,
-} from "@/server/lib/dataforseo/keyword-metrics";
-
-export {
   buildLlmTarget,
   CHATGPT_LANGUAGE_CODE,
   CHATGPT_LOCATION_CODE,
-  MAX_TASKS_PER_POST,
   type LlmPlatform,
 } from "@/server/lib/dataforseo/shared";
-
-export { SERP_ANALYSIS_DEPTH } from "@/server/lib/dataforseo/serp";
 
 export { normalizeBacklinksTarget } from "@/server/lib/dataforseoBacklinksTarget";
 
@@ -33,30 +25,18 @@ export {
 export {
   fetchAiTrackingTaskResult,
   type AiTrackingAnswer,
-  type PostedAiTrackingTask,
 } from "@/server/lib/dataforseo/ai-tracking";
 export {
   fetchBusinessDataTaskResult,
   fetchBusinessListingsCategories,
-  type BusinessTaskEndpoint,
-  type BusinessTaskOutcome,
 } from "@/server/lib/dataforseo/business";
 
 export type {
   LabsKeywordDataItem,
   DomainRankedKeywordItem,
-  RelevantPagesItem,
 } from "@/server/lib/dataforseo/labs";
 
 export type { AdsKeywordIdeaItem } from "@/server/lib/dataforseo/google-ads";
-
-export type {
-  LocalSerpTaskOutcome,
-  SerpLiveItem,
-  RankCheckResult,
-  RankCheckTaskInput,
-  PostedRankCheckTask,
-} from "@/server/lib/dataforseo/serp";
 
 export type {
   BacklinksSummaryItem,

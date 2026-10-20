@@ -24,7 +24,8 @@ import { AppError } from "@/server/lib/errors";
 // callers that need to see deeper ranks pass an explicit depth. There is no
 // offset/cursor: a deeper request re-crawls pages 1..N/10 from the top, so it
 // replaces the shallow snapshot rather than extending it.
-export const SERP_ANALYSIS_DEPTH = 20;
+export { SERP_ANALYSIS_DEPTH } from "@/server/providers/contracts/serp";
+import { SERP_ANALYSIS_DEPTH } from "@/server/providers/contracts/serp";
 
 /** DataForSEO bills SERPs in pages of 10; depth outside 10-100 is rejected. */
 export function clampSerpDepth(depth: number): number {
@@ -85,7 +86,7 @@ const serpSnapshotItemSchema = z
   })
   .passthrough();
 
-export type SerpLiveItem = z.infer<typeof serpSnapshotItemSchema>;
+type SerpLiveItem = z.infer<typeof serpSnapshotItemSchema>;
 
 export async function fetchLiveSerp(input: {
   keyword: string;
@@ -126,13 +127,11 @@ export async function fetchLiveSerp(input: {
   };
 }
 
-export interface RankCheckResult {
-  keywordId: string;
-  keyword: string;
-  position: number | null;
-  url: string | null;
-  serpFeatures: string[];
-}
+import type {
+  RankCheckResult,
+  RankCheckTaskInput,
+  PostedRankCheckTask,
+} from "@/server/providers/contracts/rank-check";
 
 function buildRankCheckResult(
   input: { keywordId: string; keyword: string; targetDomain: string },
@@ -209,16 +208,6 @@ export async function fetchRankCheckSerp(input: {
 // is task_post (charged) -> poll task_get (free) -> live fallback for
 // stragglers, orchestrated by the rank check workflow.
 // ---------------------------------------------------------------------------
-
-export interface RankCheckTaskInput {
-  keyword: string;
-  keywordId: string;
-  device: "desktop" | "mobile";
-}
-
-export interface PostedRankCheckTask extends RankCheckTaskInput {
-  taskId: string;
-}
 
 export async function postRankCheckTasks(input: {
   tasks: RankCheckTaskInput[];
@@ -483,7 +472,7 @@ export async function postLocalSerpTasks(input: {
   return { data: taskIds, billing };
 }
 
-export type LocalSerpTaskOutcome =
+type LocalSerpTaskOutcome =
   | { status: "pending" }
   | { status: "failed"; message: string }
   | { status: "completed"; items: Record<string, unknown>[] };

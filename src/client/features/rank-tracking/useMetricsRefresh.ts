@@ -13,7 +13,13 @@ export function useMetricsRefresh(projectId: string, configId: string) {
       void queryClient.invalidateQueries({
         queryKey: ["rankTrackingResults", projectId, configId],
       });
-      toast.success(`Metrics updated for ${result.updated} keywords`);
+      if (result.failures?.length) {
+        toast.warning(
+          `Metrics updated for ${result.updated} keywords; ${result.failures.length} could not be refreshed.`,
+        );
+      } else {
+        toast.success(`Metrics updated for ${result.updated} keywords`);
+      }
     },
   });
   return { refresh: mutation.mutate, isRefreshing: mutation.isPending };

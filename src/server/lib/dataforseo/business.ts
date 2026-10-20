@@ -178,10 +178,7 @@ function postedTaskId<T extends DataforseoTaskLike & { id?: string }>(
   return { data: task.id, billing: buildTaskBilling(task) };
 }
 
-export type BusinessTaskEndpoint =
-  | "reviews"
-  | "extended_reviews"
-  | "my_business_updates";
+import type { BusinessTaskEndpoint } from "@/server/providers/contracts/local-business";
 
 type BusinessIdentifierInput = {
   keyword?: string;
@@ -258,7 +255,7 @@ export async function postMyBusinessUpdatesTask(
   );
 }
 
-export type BusinessTaskOutcome = {
+type BusinessTaskOutcome = {
   status: "pending" | "completed";
   /** The first `result` entry once the task completed; null when empty. */
   result: Record<string, unknown> | null;
@@ -287,10 +284,8 @@ export async function fetchBusinessDataTaskResult(input: {
   if (task.status_code !== 20000) {
     // "No Search Results" is a valid empty outcome (no reviews/updates yet).
     if (!isNoResultsTask(task)) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        task.status_message || `DataForSEO task failed (${task.status_code})`,
-      );
+      const failure = failedResponseError(task, "DataForSEO task failed");
+      throw new AppError(failure.code);
     }
     return { status: "completed", result: null };
   }

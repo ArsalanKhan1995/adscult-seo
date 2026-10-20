@@ -66,7 +66,7 @@ export const savedKeywordMetricSchema = z.object({
       z.object({
         year: z.number().int().positive(),
         month: z.number().int().min(1).max(12),
-        searchVolume: z.number().int().nonnegative(),
+        searchVolume: z.number().int().nonnegative().nullable(),
       }),
     )
     .optional(),

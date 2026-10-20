@@ -5,7 +5,7 @@ vi.mock("@/server/lib/dataforseo", () => ({
 }));
 
 import type { AdsKeywordIdeaItem } from "@/server/lib/dataforseo";
-import { mapAdsKeywordItems } from "./research-data";
+import { mapAdsKeywordItems } from "@/server/providers/dataforseo/keyword-research";
 
 describe("mapAdsKeywordItems", () => {
   it("dedupes case-variant keywords and skips empty ones", () => {

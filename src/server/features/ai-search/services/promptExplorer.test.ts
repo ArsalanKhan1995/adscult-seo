@@ -1,8 +1,12 @@
+import { withProviderScope } from "@/server/providers/context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCached, setCached, buildCacheKey } from "@/server/lib/r2-cache";
 import { promptExplorerInputSchema } from "@/types/schemas/ai-search";
-import type { LlmResponseResult } from "@/server/lib/dataforseoLlmSchemas";
-import { explorePrompt, extractCitations } from "./promptExplorer";
+import type { LlmResponseResult } from "@/server/providers/contracts/ai-research";
+import {
+  explorePrompt as explorePromptInRequest,
+  extractCitations,
+} from "./promptExplorer";
 
 vi.mock("cloudflare:workers", () => ({ waitUntil: vi.fn() }));
 
@@ -235,3 +239,21 @@ describe("Prompt Explorer countries", () => {
     });
   });
 });
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
+
+// Services run inside the request scope installed by authentication middleware.
+function explorePrompt(...args: Parameters<typeof explorePromptInRequest>) {
+  return withProviderScope(args[1].organizationId, () =>
+    explorePromptInRequest(...args),
+  );
+}

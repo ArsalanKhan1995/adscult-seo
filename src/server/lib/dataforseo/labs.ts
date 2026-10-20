@@ -64,7 +64,7 @@ type DomainMetricsItem = {
   [key: string]: unknown;
 };
 
-export interface RelevantPagesItem {
+interface RelevantPagesItem {
   page_address?: string | null;
   metrics?: LabsMetricsBlock | null;
   [key: string]: unknown;
@@ -261,6 +261,7 @@ export async function fetchDomainRankOverview(input: {
 type RankedKeywordsPage = {
   items: DomainRankedKeywordItem[];
   totalCount: number | null;
+  receivedCount?: number;
 };
 
 export async function fetchRankedKeywords(input: {
@@ -300,6 +301,7 @@ export async function fetchRankedKeywords(input: {
         domainRankedKeywordItemSchema,
       ),
       totalCount: task.result?.[0]?.total_count ?? null,
+      receivedCount: task.result?.[0]?.items?.length ?? 0,
     },
     billing: buildTaskBilling(task),
   };

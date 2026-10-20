@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireAuthenticatedContext } from "@/serverFunctions/middleware";
-import { fetchSerpLocationsForCountry } from "@/server/lib/dataforseo/serp-locations";
+import { fetchSearchLocations } from "@/server/providers/search-locations";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { rankSerpLocations } from "@/shared/serp-location-search";
 
 /** ISO 3166-1 alpha-2, e.g. "us" — DataForSEO rejects country names. */
@@ -16,7 +17,9 @@ export const searchSerpLocations = createServerFn({ method: "POST" })
   .middleware(requireAuthenticatedContext)
   .validator(searchSerpLocationsSchema)
   .handler(async ({ data }) => {
-    const all = await fetchSerpLocationsForCountry(data.countryCode);
+    const { locations: all } = unwrapProviderResult(
+      await fetchSearchLocations(data.countryCode),
+    );
     return rankSerpLocations(data.query, all, data.countryCode);
   });
 
@@ -29,6 +32,6 @@ export const prewarmSerpLocations = createServerFn({ method: "POST" })
   .middleware(requireAuthenticatedContext)
   .validator(z.object({ countryCode: countryCodeField }))
   .handler(async ({ data }) => {
-    await fetchSerpLocationsForCountry(data.countryCode);
+    unwrapProviderResult(await fetchSearchLocations(data.countryCode));
     return { warmed: true };
   });

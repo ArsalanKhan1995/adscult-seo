@@ -1,3 +1,4 @@
+import { dataforseoAccountErrorCode } from "@/server/providers/dataforseo/account-error";
 import { dataforseoGet, dataforseoPost } from "@/server/lib/dataforseo/core";
 import { MAX_TASKS_PER_POST } from "@/server/lib/dataforseo/shared";
 import {
@@ -51,7 +52,7 @@ interface AiTrackingMarket {
 // Live answers can take up to 120 seconds.
 const LIVE_REQUEST_TIMEOUT_MS = 150_000;
 
-export interface PostedAiTrackingTask {
+interface PostedAiTrackingTask {
   tag: string;
   taskId: string;
 }
@@ -184,7 +185,9 @@ function aiTrackingAnswer(
       message:
         task.status_message || `DataForSEO task failed (${task.status_code})`,
       // Like assertOk: the provider's own failure, or a request we got wrong.
-      code: upstream ? "UPSTREAM_UNAVAILABLE" : "INTERNAL_ERROR",
+      code:
+        dataforseoAccountErrorCode(task.status_code) ??
+        (upstream ? "UPSTREAM_UNAVAILABLE" : "INTERNAL_ERROR"),
       retryable: upstream,
     };
   }

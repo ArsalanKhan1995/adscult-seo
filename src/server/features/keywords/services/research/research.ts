@@ -1,3 +1,5 @@
+import { keywordResearchRowSchema } from "@/server/providers/contracts/keyword-research";
+import { recordProviderResultSource } from "@/server/providers/result-source";
 import { AppError } from "@/server/lib/errors";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import type { CreditFeature } from "@/shared/billing-credit-features";
@@ -37,36 +39,16 @@ type ResearchResult = {
   rows: KeywordResearchRow[];
   source: ResearchSource;
   usedFallback: boolean;
+  providerResultSourceId?: string | null;
 };
 
 type CachedResult = ResearchResult;
 
-const cachedKeywordRowSchema = z.object({
-  keyword: z.string(),
-  searchVolume: z.number().nullable(),
-  trend: z.array(
-    z.object({
-      year: z.number(),
-      month: z.number(),
-      searchVolume: z.number(),
-    }),
-  ),
-  cpc: z.number().nullable(),
-  competition: z.number().nullable(),
-  keywordDifficulty: z.number().nullable(),
-  intent: z.enum([
-    "informational",
-    "commercial",
-    "transactional",
-    "navigational",
-    "unknown",
-  ]),
-});
-
 const cachedResultSchema = z.object({
-  rows: z.array(cachedKeywordRowSchema),
+  rows: z.array(keywordResearchRowSchema),
   source: z.enum(["related", "suggestions", "ideas", "google_ads", "blended"]),
   usedFallback: z.boolean(),
+  providerResultSourceId: z.string().nullable().optional(),
 });
 
 // v5: auto mode blends suggestions + ideas. v4 (collapsed close variants)
@@ -231,10 +213,12 @@ async function buildResearchCacheKey(
 function persistRows(
   input: ResolvedResearchKeywordsInput,
   rows: EnrichedKeyword[],
+  providerResultSourceId: string | null,
 ): Promise<void> {
   return Promise.all(
     rows.map((row) =>
       KeywordResearchRepository.upsertKeywordMetric({
+        providerResultSourceId,
         projectId: input.projectId,
         keyword: row.keyword,
         locationCode: input.locationCode,
@@ -327,10 +311,16 @@ export async function research(
             creditFeature,
           );
 
+  result.providerResultSourceId ??=
+    await recordProviderResultSource("keywords.research");
   await setCached(cacheKey, result, CACHE_TTL.researchResult);
   // Keyword metrics are stored per country, so local rows are not persisted.
   if (!effectiveInput.locationName)
-    void persistRows(effectiveInput, result.rows);
+    await persistRows(
+      effectiveInput,
+      result.rows,
+      result.providerResultSourceId ?? null,
+    );
 
   return result;
 }
@@ -356,7 +346,11 @@ async function researchLocal(
   // A save from local results sends no metrics, so the saved keyword relies on
   // the stored national ones. Store them before returning, also when the
   // national result came from the cache.
-  await persistRows(nationalInput, national.rows);
+  await persistRows(
+    nationalInput,
+    national.rows,
+    national.providerResultSourceId ?? null,
+  );
   return {
     ...national,
     rows: await localizeResearchRows(

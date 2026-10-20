@@ -1,12 +1,11 @@
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { env } from "cloudflare:workers";
 import {
   customerHasPaidPlan,
   type BillingCustomerContext,
 } from "@/server/billing/subscription";
-import {
-  createDataforseoClient,
-  fetchKeywordMetricsForList,
-} from "@/server/lib/dataforseo";
+import { fetchKeywordMetrics } from "@/server/providers/keyword-metrics";
+import { recordProviderResultSource } from "@/server/providers/result-source";
 import { RankTrackingRepository } from "@/server/features/rank-tracking/repositories/RankTrackingRepository";
 import { assertSerpLocationNameAccepted } from "@/server/lib/dataforseo/serp-location-validate";
 import { AppError } from "@/server/lib/errors";
@@ -336,14 +335,16 @@ async function refreshKeywordMetrics(
   configId: string,
   projectId: string,
   billingCustomer: BillingCustomerContext,
-): Promise<{ updated: number }> {
+): Promise<{
+  updated: number;
+  failures?: Array<{ keyword: string; code: string }>;
+}> {
   const config = await getValidatedConfig(configId, projectId);
   await requireRankCheckAccess(billingCustomer.organizationId);
   const keywords = await RankTrackingRepository.getKeywordsForConfig(configId);
   if (keywords.length === 0) return { updated: 0 };
 
-  const client = createDataforseoClient(billingCustomer);
-  const metrics = await fetchKeywordMetricsForList(client, {
+  const batch = await fetchKeywordMetrics(billingCustomer, {
     // The keyword-data APIs are case-insensitive and echo keywords back
     // lowercased, so ask in lowercase. A match-case keyword can sit next to
     // its lowercase twin; both then map to the same metrics row and the
@@ -361,6 +362,15 @@ async function refreshKeywordMetrics(
     locationName: config.locationName ?? undefined,
     creditFeature: "rank_tracking",
   });
+  const data = unwrapProviderResult(batch);
+  const metrics = data.items.flatMap(({ result }) =>
+    result.ok ? [result.data] : [],
+  );
+  const failures = data.items.flatMap(({ keyword, result }) =>
+    result.ok ? [] : [{ keyword, code: result.error.code }],
+  );
+  const providerResultSourceId =
+    await recordProviderResultSource("keywords.metrics");
   const byKeyword = new Map(
     metrics.map((metric) => [metric.keyword.toLowerCase(), metric]),
   );
@@ -377,13 +387,14 @@ async function refreshKeywordMetrics(
         keywordDifficulty: metric.keywordDifficulty,
         cpc: metric.cpc,
         metricsFetchedAt: now,
+        providerResultSourceId,
       };
     })
     .filter((u): u is NonNullable<typeof u> => u !== null);
 
   if (updates.length === 0) return { updated: 0 };
   await RankTrackingRepository.updateKeywordMetrics(updates);
-  return { updated: updates.length };
+  return { updated: updates.length, ...(failures.length ? { failures } : {}) };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { getScopedProviderExecution } from "@/server/providers/context";
 import { z } from "zod";
 import { dataforseoGet } from "@/server/lib/dataforseo/core";
 import { assertOk } from "@/server/lib/dataforseo/envelope";
@@ -102,13 +103,23 @@ const CATALOG_TTL_MS = 60 * 60 * 1000;
 
 // Per-isolate cache: the catalog is free but there's no reason to refetch it
 // on every prompt. Failures are not cached, so a transient outage self-heals.
-const catalogCache = new Map<
-  LlmResponseModelSlug,
-  { names: string[]; fetchedAt: number }
->();
+const catalogCache = new Map<string, { names: string[]; fetchedAt: number }>();
 
 async function getLlmModelNames(slug: LlmResponseModelSlug): Promise<string[]> {
-  const cached = catalogCache.get(slug);
+  const execution = await getScopedProviderExecution();
+  const key = [
+    "ai.models:v1",
+    execution?.organizationId ?? "installation",
+    execution?.provider ?? "dataforseo",
+    execution?.revision ?? 0,
+    execution?.credentialVersion ?? "environment",
+    slug,
+  ].join(":");
+  for (const [entryKey, entry] of catalogCache) {
+    if (Date.now() - entry.fetchedAt >= CATALOG_TTL_MS)
+      catalogCache.delete(entryKey);
+  }
+  const cached = catalogCache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CATALOG_TTL_MS) {
     return cached.names;
   }
@@ -122,7 +133,7 @@ async function getLlmModelNames(slug: LlmResponseModelSlug): Promise<string[]> {
       return parsed.success ? [parsed.data.model_name] : [];
     });
     if (names.length === 0) return FALLBACK_MODEL_NAMES[slug];
-    catalogCache.set(slug, { names, fetchedAt: Date.now() });
+    catalogCache.set(key, { names, fetchedAt: Date.now() });
     return names;
   } catch (error) {
     console.warn(`dataforseo.llm-models.catalog-fetch failed (${slug})`, error);

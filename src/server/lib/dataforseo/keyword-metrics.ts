@@ -1,12 +1,11 @@
+import { normalizeMonthlySearches } from "@/server/providers/dataforseo/normalize-monthly-searches";
 import type { createDataforseoClient } from "@/server/lib/dataforseo/client";
 import {
   isAdsKeyword,
   type AdsKeywordItem,
 } from "@/server/lib/dataforseo/google-ads";
 import type { KeywordOverviewItem } from "@/server/lib/dataforseo/labs";
-import type { CreditFeature } from "@/shared/billing-credit-features";
 import { getKeywordDataProvider } from "@/shared/keyword-locations";
-import type { MonthlySearch } from "@/types/keywords";
 
 type DataforseoClient = ReturnType<typeof createDataforseoClient>;
 
@@ -35,33 +34,10 @@ const KEYWORD_METRICS_BATCH_SIZE = 700;
 
 // `intent` is the raw `main_intent` (null for Google Ads); run it through
 // `normalizeIntent` for the app enum. `competition` is a 0-1 ratio.
-export type KeywordMetricRow = {
-  keyword: string;
-  searchVolume: number | null;
-  cpc: number | null;
-  competition: number | null;
-  competitionLevel: string | null;
-  keywordDifficulty: number | null;
-  intent: string | null;
-  monthlySearches: MonthlySearch[];
-};
-
-function toMonthlySearches(
-  entries:
-    | {
-        year?: number | null;
-        month?: number | null;
-        search_volume?: number | null;
-      }[]
-    | null
-    | undefined,
-): MonthlySearch[] {
-  return (entries ?? []).map((entry) => ({
-    year: entry.year ?? 0,
-    month: entry.month ?? 0,
-    searchVolume: entry.search_volume ?? 0,
-  }));
-}
+import type {
+  KeywordMetricRow,
+  KeywordMetricsRequest,
+} from "@/server/providers/types";
 
 function normalizeKeywordOverview(
   item: KeywordOverviewItem,
@@ -80,7 +56,7 @@ function normalizeKeywordOverview(
     competitionLevel: info?.competition_level ?? null,
     keywordDifficulty: item.keyword_properties?.keyword_difficulty ?? null,
     intent: item.search_intent_info?.main_intent ?? null,
-    monthlySearches: toMonthlySearches(
+    monthlySearches: normalizeMonthlySearches(
       usesClickstream
         ? clickstreamInfo?.monthly_searches
         : info?.monthly_searches,
@@ -104,7 +80,7 @@ function normalizeAdsKeyword(
     competitionLevel: item.competition ?? null,
     keywordDifficulty: null,
     intent: null,
-    monthlySearches: toMonthlySearches(item.monthly_searches),
+    monthlySearches: normalizeMonthlySearches(item.monthly_searches),
   };
 }
 
@@ -121,14 +97,7 @@ function normalizeAdsKeyword(
 // null volume / CPC.
 export async function fetchKeywordMetricsForList(
   client: KeywordMetricsClient,
-  params: {
-    keywords: string[];
-    locationCode: number;
-    languageCode: string;
-    creditFeature: CreditFeature;
-    includeClickstreamData?: boolean;
-    locationName?: string;
-  },
+  params: KeywordMetricsRequest,
 ): Promise<KeywordMetricRow[]> {
   const useGoogleAds =
     getKeywordDataProvider(params.locationCode) === "google_ads";
@@ -198,7 +167,15 @@ export async function fetchKeywordMetricsForList(
     }
   }
 
-  return rows;
+  // Upstreams can reorder, lowercase or collapse inputs. Keep correspondence
+  // at the adapter boundary, including duplicate inputs and absent metrics.
+  const byKeyword = new Map(
+    rows.map((row) => [row.keyword.toLowerCase(), row]),
+  );
+  return params.keywords.map((keyword) => ({
+    ...(byKeyword.get(keyword.toLowerCase()) ?? nullMetricRow(keyword)),
+    keyword,
+  }));
 }
 
 function nullMetricRow(keyword: string): KeywordMetricRow {

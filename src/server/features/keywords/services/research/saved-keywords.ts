@@ -20,7 +20,7 @@ import { z } from "zod";
 const monthlySearchSchema = z.object({
   year: z.number().int().positive(),
   month: z.number().int().min(1).max(12),
-  searchVolume: z.number().int().nonnegative(),
+  searchVolume: z.number().int().nonnegative().nullable(),
 });
 
 const monthlySearchesCodec = jsonCodec(z.array(monthlySearchSchema));
@@ -62,6 +62,7 @@ export async function saveKeywords(input: ResolvedSaveKeywordsInput) {
         if (!metric) return;
 
         await KeywordResearchRepository.upsertKeywordMetric({
+          onlyIfMissing: true,
           projectId: input.projectId,
           keyword,
           locationCode: input.locationCode,

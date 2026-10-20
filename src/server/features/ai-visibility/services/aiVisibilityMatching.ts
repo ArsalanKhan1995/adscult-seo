@@ -1,7 +1,7 @@
 import { sort } from "remeda";
 import { parse } from "tldts";
 import type { AiBrand } from "@/shared/ai-visibility";
-import type { ParsedAiAnswer } from "../providers/dataforseoEvidence";
+import type { ParsedAiAnswer } from "@/server/providers/contracts/ai-answer";
 
 export function ownedAiDomain(hostname: string, owned: string): boolean {
   const host = hostname.toLowerCase().replace(/^www\./, "");

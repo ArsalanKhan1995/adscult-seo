@@ -1,10 +1,11 @@
-import type { KeywordIntent, KeywordResearchRow } from "@/types/keywords";
+import type { KeywordResearchRow } from "@/types/keywords";
 
 export type EnrichedKeyword = KeywordResearchRow;
 
-export function normalizeKeyword(input: string): string {
-  return input.trim().toLowerCase();
-}
+export {
+  normalizeKeyword,
+  normalizeIntent,
+} from "@/shared/keyword-normalization";
 
 /**
  * Alternates rows from two sources into one list, deduping by keyword, so a
@@ -29,14 +30,4 @@ export function interleaveRows(
   }
 
   return rows;
-}
-
-export function normalizeIntent(raw: string | null | undefined): KeywordIntent {
-  if (!raw) return "unknown";
-  const value = raw.toLowerCase();
-  if (value.includes("inform")) return "informational";
-  if (value.includes("commerc")) return "commercial";
-  if (value.includes("transact")) return "transactional";
-  if (value.includes("navig")) return "navigational";
-  return "unknown";
 }

@@ -30,6 +30,8 @@ vi.mock("@/db", () => ({ db: testDb.db }));
 vi.mock("@/db/runBatch", () => ({ runBatch: testDb.runBatch }));
 vi.mock("@/server/lib/runtime-env", () => ({
   isHostedServerAuthMode: async () => false,
+  getOptionalEnvValue: async (key: string) =>
+    key === "DATAFORSEO_API_KEY" ? btoa("test:password") : undefined,
 }));
 vi.mock("@/server/lib/dataforseo", () => ({
   MAX_TASKS_PER_POST: 100,
@@ -120,7 +122,7 @@ describe("AI answer collection", () => {
       },
     });
 
-    const round = await collectAiRound(runId, [pendingTask], true);
+    const round = await collectAiRound(runId, [pendingTask], true, customer);
 
     expect(round).toEqual({ pending: [], retry: [] });
     expect(await repo.getObservation("answer-0")).toMatchObject({
@@ -197,6 +199,7 @@ describe("AI answer collection", () => {
         },
       ],
       true,
+      customer,
     );
 
     expect(round.retry).toEqual([
@@ -283,7 +286,7 @@ describe("AI answer collection", () => {
     ]);
     expect(await repo.getObservation("answer-1")).toMatchObject({
       status: "failed",
-      error: "INTERNAL_ERROR",
+      error: "UPSTREAM_UNAVAILABLE",
     });
   });
 
@@ -413,7 +416,7 @@ describe("AI answer collection", () => {
       status: "completed",
       result: { markdown: "OpenSEO", sources: [] },
     });
-    await collectAiRound(runId, [pendingTask], true);
+    await collectAiRound(runId, [pendingTask], true, customer);
 
     await finalizeAiRun(runId);
 
@@ -426,3 +429,7 @@ describe("AI answer collection", () => {
     });
   });
 });
+
+vi.mock("@/server/providers/task-context", () => ({
+  resolveTaskExecution: async (_path: string, current: unknown) => current,
+}));

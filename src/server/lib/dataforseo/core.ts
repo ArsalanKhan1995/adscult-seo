@@ -1,3 +1,7 @@
+import { getScopedProviderExecution } from "@/server/providers/context";
+import { getProviderAdapter } from "@/server/providers/registry";
+import { dataforseoAccountErrorCode } from "@/server/providers/dataforseo/account-error";
+import type { ProviderExecution } from "@/server/providers/types";
 import { AppError } from "@/server/lib/errors";
 import { getRequiredEnvValue } from "@/server/lib/runtime-env";
 import type { ErrorCode } from "@/shared/error-codes";
@@ -5,12 +9,12 @@ import type { ErrorCode } from "@/shared/error-codes";
 // type from here.
 import {
   warnIfUpstreamResponseFailed,
+  DataforseoChargedTaskError,
   type DataforseoResponseLike,
   type DataforseoTaskLike,
 } from "@/server/lib/dataforseo/envelope";
 
 const API_BASE = "https://api.dataforseo.com";
-const MAX_DATAFORSEO_ERROR_PAYLOAD_LENGTH = 1600;
 // Safety ceiling on any live call (Lighthouse is the slowest, ~tens of seconds).
 const DATAFORSEO_REQUEST_TIMEOUT_MS = 60_000;
 // Retry idempotent reads on transient 5xx. Total attempts = retries + 1; the
@@ -29,23 +33,6 @@ export type DataforseoErrorClassifier = (
   details: string,
   path: string,
 ) => AppError | null;
-
-function formatDataforseoErrorPayload(value: unknown): string {
-  const text =
-    typeof value === "string"
-      ? value
-      : (() => {
-          try {
-            return JSON.stringify(value);
-          } catch {
-            return String(value);
-          }
-        })();
-
-  return text.length > MAX_DATAFORSEO_ERROR_PAYLOAD_LENGTH
-    ? `${text.slice(0, MAX_DATAFORSEO_ERROR_PAYLOAD_LENGTH)}... [truncated]`
-    : text;
-}
 
 function formatDataforseoRequestPath(url: RequestInfo): string {
   const rawUrl = typeof url === "string" ? url : url.url;
@@ -67,9 +54,35 @@ function createAuthenticatedFetch(
   maxServerErrorRetries = DATAFORSEO_MAX_RETRIES,
 ) {
   return async (url: RequestInfo, init?: RequestInit): Promise<Response> => {
-    const apiKey = await getRequiredEnvValue("DATAFORSEO_API_KEY");
+    const scopedExecution = await getScopedProviderExecution();
+    // Loading the persistence seam only for scoped app requests preserves the
+    // existing environment-only CLI and section-test entry points.
+    const execution = scopedExecution
+      ? await (
+          await import("@/server/providers/task-context")
+        ).resolveTaskExecution(
+          new URL(typeof url === "string" ? url : url.url).pathname,
+          scopedExecution,
+        )
+      : undefined;
+    if (execution?.provider === "treg")
+      throw new AppError("SEO_PROVIDER_UNSUPPORTED");
+    const apiKey =
+      execution?.authorization ??
+      (await getRequiredEnvValue("DATAFORSEO_API_KEY"));
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Basic ${apiKey}`);
+    const requestExecution: ProviderExecution =
+      execution ??
+      Object.freeze({
+        organizationId: "installation-cli",
+        provider: "dataforseo",
+        revision: 0,
+        credentialVersion: null,
+        source: "environment",
+        authorization: apiKey,
+      });
+    const adapter = getProviderAdapter(requestExecution.provider);
     // Resolve the signal once so retries share the overall request timeout
     // rather than restarting a fresh 60s budget on each attempt.
     const signal =
@@ -78,7 +91,11 @@ function createAuthenticatedFetch(
     for (let attempt = 0; ; attempt++) {
       let response: Response;
       try {
-        response = await fetch(url, { ...init, headers, signal });
+        response = await adapter.request(
+          requestExecution,
+          typeof url === "string" ? url : url.url,
+          { ...init, headers, signal },
+        );
       } catch (error) {
         // Both abort flavours mean "we ran out of time", and neither carries a
         // useful name of its own: the shared budget above rejects with
@@ -116,7 +133,10 @@ function createAuthenticatedFetch(
 
       const rawText = await response.text();
       const path = formatDataforseoRequestPath(url);
-      const classified = classify?.(response.status, rawText, path);
+      const accountCode = dataforseoAccountErrorCode(response.status);
+      const classified =
+        classify?.(response.status, rawText, path) ??
+        (accountCode ? new AppError(accountCode) : null);
       if (classified) throw classified;
 
       const code: ErrorCode =
@@ -134,7 +154,6 @@ function createAuthenticatedFetch(
           provider: "dataforseo",
           providerStatus: String(response.status),
           providerPath: path,
-          responseBody: formatDataforseoErrorPayload(rawText),
         },
       );
       error.name = "DataForSEOHttpError";
@@ -157,9 +176,8 @@ type DataforseoRequestOptions = {
   /** Maps a recognised access / billing HTTP failure to a product error. */
   classify?: DataforseoErrorClassifier;
   /**
-   * Set 0 for billed, non-idempotent calls (business task_post, Lighthouse):
-   * a 5xx does not prove the provider skipped the charge, so those must never
-   * be replayed. Defaults to retrying idempotent reads on transient 5xx.
+   * Billable POSTs default to no retries: a 5xx does not prove the provider
+   * skipped the charge. Free GET collection retries transient 5xx.
    */
   maxServerErrorRetries?: number;
   /** The sandbox host validates requests like production at zero cost. */
@@ -175,7 +193,8 @@ async function requestDataforseo<TTask extends DataforseoTaskLike>(
 ): Promise<DataforseoResponseLike<TTask> | null> {
   const doFetch = createAuthenticatedFetch(
     options.classify,
-    options.maxServerErrorRetries,
+    options.maxServerErrorRetries ??
+      (method === "POST" ? 0 : DATAFORSEO_MAX_RETRIES),
   );
   const response = await doFetch(`${options.baseUrl ?? API_BASE}${path}`, {
     method,
@@ -190,6 +209,31 @@ async function requestDataforseo<TTask extends DataforseoTaskLike>(
   if (text === "") return null;
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the task type is the caller's claim about the payload; billing metadata and item fields are validated downstream (envelope.ts + section Zod schemas)
   const parsed = JSON.parse(text) as DataforseoResponseLike<TTask>;
+  if (path.endsWith("/task_post") && (await getScopedProviderExecution())) {
+    try {
+      await (
+        await import("@/server/providers/task-context")
+      ).recordSubmittedTasks(path, parsed);
+    } catch {
+      // A post can have been charged even if persistence then fails. Preserve
+      // that charge at the metering boundary and never replay the submission.
+      const costs = parsed.tasks?.map((task) => task.cost) ?? [];
+      const costUsd = costs.reduce<number>(
+        (sum, cost) =>
+          sum +
+          (typeof cost === "number" && Number.isFinite(cost) && cost >= 0
+            ? cost
+            : 0),
+        0,
+      );
+      throw new DataforseoChargedTaskError(
+        "Could not retain SEO task configuration. Do not retry this submission automatically.",
+        { path: path.split("/").filter(Boolean), costUsd },
+        false,
+        "SEO_PROVIDER_CONFIGURATION_UNAVAILABLE",
+      );
+    }
+  }
   warnIfUpstreamResponseFailed(parsed, path);
   return parsed;
 }
@@ -225,7 +269,7 @@ export function dataforseoPostResponse(
 ): Promise<Response> {
   const doFetch = createAuthenticatedFetch(
     options.classify,
-    options.maxServerErrorRetries,
+    options.maxServerErrorRetries ?? 0,
   );
   return doFetch(`${API_BASE}${path}`, {
     method: "POST",

@@ -1,3 +1,5 @@
+import { resolveProviderReference } from "@/server/providers/resolver";
+import { AppError } from "@/server/lib/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowStep } from "cloudflare:workers";
 import { AiVisibilityWorkflow } from "./AiVisibilityWorkflow";
@@ -12,6 +14,14 @@ const mocks = vi.hoisted(() => ({
   markFailed: vi.fn(),
   sleep: vi.fn(),
   steps: vi.fn(),
+}));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderReference: vi.fn(async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+  })),
 }));
 vi.mock("cloudflare:workers", () => ({ WorkflowEntrypoint: vi.fn() }));
 vi.mock("@/server/features/ai-visibility/services/aiResearchKeywords", () => ({
@@ -77,6 +87,18 @@ beforeEach(() => {
 });
 
 describe("AI visibility workflow", () => {
+  it("marks the run failed when provider configuration cannot be resolved", async () => {
+    vi.mocked(resolveProviderReference).mockRejectedValueOnce(
+      new AppError("SEO_PROVIDER_NOT_CONFIGURED"),
+    );
+    await expect(execute()).rejects.toMatchObject({
+      code: "SEO_PROVIDER_NOT_CONFIGURED",
+    });
+    expect(mocks.markFailed).toHaveBeenCalledExactlyOnceWith("run");
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(mocks.live).not.toHaveBeenCalled();
+  });
+
   it("posts each batch in a step that never retries, then collects and finalizes", async () => {
     await execute();
     expect(mocks.post).toHaveBeenCalledTimes(2);
@@ -88,6 +110,7 @@ describe("AI visibility workflow", () => {
       "run",
       [task, task],
       true,
+      customer,
     );
     expect(mocks.sleep).toHaveBeenCalledOnce();
     expect(mocks.finalize).toHaveBeenCalledExactlyOnceWith("run");
@@ -149,6 +172,7 @@ describe("AI visibility workflow", () => {
       "run",
       expect.anything(),
       false,
+      customer,
     );
   });
 

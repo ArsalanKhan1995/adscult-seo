@@ -126,3 +126,14 @@ describe("explore_prompt", () => {
     expect(mocks.client).not.toHaveBeenCalled();
   });
 });
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));

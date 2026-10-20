@@ -1,3 +1,4 @@
+import { seoProviderResultSources } from "./seo-provider.schema";
 import { sql } from "drizzle-orm";
 import {
   sqliteTable,
@@ -100,6 +101,10 @@ export const aiRuns = sqliteTable(
 export const aiObservations = sqliteTable(
   "ai_observations",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: text("id").primaryKey(),
     runId: text("run_id")
       .notNull()

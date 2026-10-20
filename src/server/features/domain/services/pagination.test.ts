@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeHasMore } from "@/server/features/domain/services/pagination";
+import { computeHasMore } from "@/server/providers/pagination";
 
 describe("computeHasMore", () => {
   it.each([

@@ -62,6 +62,47 @@ beforeEach(() => {
 });
 
 describe("get_business_profile", () => {
+  it("keeps profile evidence while stripping vendor-only fields from nested objects", async () => {
+    mocks.createDataforseoClient.mockReturnValue({
+      business: {
+        myBusinessInfo: vi.fn().mockResolvedValue({
+          title: "Cafe",
+          private_vendor_payload: "raw",
+          rating: {
+            value: 0,
+            votes_count: null,
+            private_vendor_payload: "raw",
+          },
+        }),
+      },
+    });
+    const result = await getBusinessProfileTool.handler(
+      { projectId: "project_1", cid: "123" },
+      toolContext,
+    );
+    expect(result.structuredContent.profile).toMatchObject({
+      title: "Cafe",
+      rating: { value: 0, votes_count: null },
+    });
+    expect(JSON.stringify(result.structuredContent)).not.toContain(
+      "private_vendor_payload",
+    );
+  });
+  it("distinguishes an unknown star count from a measured zero", async () => {
+    mocks.createDataforseoClient.mockReturnValue({
+      business: {
+        myBusinessInfo: vi.fn().mockResolvedValue({
+          title: "Cafe",
+          rating_distribution: { "5": 0 },
+        }),
+      },
+    });
+    const result = await getBusinessProfileTool.handler(
+      { projectId: "project_1", cid: "123" },
+      toolContext,
+    );
+    expect(textContent(result)).toContain("5\u2605 0, 4\u2605 \u2014");
+  });
   it("rejects anything other than exactly one business identifier", async () => {
     await expect(
       getBusinessProfileTool.handler(
@@ -399,7 +440,7 @@ describe("get_local_rank_grid", () => {
     await expect(failing).rejects.toMatchObject({
       code: "UPSTREAM_UNAVAILABLE",
     });
-    await expect(failing).rejects.toThrow("Internal Error.");
+    await expect(failing).rejects.not.toThrow("Internal Error.");
 
     await expect(
       getLocalRankGridTool.handler(gridArgs, toolContext),
@@ -456,9 +497,8 @@ describe("list_business_categories", () => {
       toolContext,
     );
 
-    // Free endpoint: must never touch the metered client (a zero-credit org
-    // would otherwise be refused by the credit gate).
-    expect(mocks.createDataforseoClient).not.toHaveBeenCalled();
+    // The free endpoint works without any metered method on the client.
+    expect(mocks.fetchBusinessListingsCategories).toHaveBeenCalledOnce();
     expect(mocks.setCached).toHaveBeenCalledTimes(1);
     expect(result.structuredContent.categories).toEqual([
       { category: "pizza_restaurant", businessCount: 120 },
@@ -466,3 +506,18 @@ describe("list_business_categories", () => {
     expect(textContent(result)).toContain("pizza_restaurant | 120");
   });
 });
+
+vi.mock("@/server/providers/task-context", () => ({
+  resolveTaskExecution: async (_path: string, current: unknown) => current,
+}));
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));

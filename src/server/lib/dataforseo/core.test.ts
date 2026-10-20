@@ -4,7 +4,7 @@ vi.mock("@/server/lib/runtime-env", () => ({
   getRequiredEnvValue: vi.fn(async () => "encoded-credentials"),
 }));
 
-import { dataforseoPost } from "@/server/lib/dataforseo/core";
+import { dataforseoGet, dataforseoPost } from "@/server/lib/dataforseo/core";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -19,15 +19,33 @@ describe("DataForSEO transport", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      dataforseoPost("/v3/backlinks/summary/live", []),
+      dataforseoGet("/v3/serp/google/organic/task_get/advanced/task-1"),
     ).resolves.toEqual({ status_code: 20000, tasks: [] });
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.dataforseo.com/v3/backlinks/summary/live");
+    expect(url).toBe(
+      "https://api.dataforseo.com/v3/serp/google/organic/task_get/advanced/task-1",
+    );
     expect(new Headers(init?.headers).get("Authorization")).toBe(
       "Basic encoded-credentials",
     );
+  });
+
+  it("does not replay a billable live submission after an ambiguous HTTP failure or expose its body", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response("raw upstream payload", { status: 503 }),
+      )
+      .mockResolvedValueOnce(Response.json({ status_code: 20000, tasks: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = dataforseoPost("/v3/backlinks/summary/live", []);
+    await expect(result).rejects.toMatchObject({
+      code: "UPSTREAM_UNAVAILABLE",
+    });
+    await expect(result).rejects.not.toHaveProperty("details.responseBody");
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   // The request-deadline abort arrives as a bare DOMException. Left unclassified

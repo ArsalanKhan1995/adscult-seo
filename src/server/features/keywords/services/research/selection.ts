@@ -1,6 +1,7 @@
+import type { KeywordResearchRequest } from "@/server/providers/contracts/keyword-research";
 import type { EnrichedKeyword } from "./helpers";
 
-export type KeywordSource = "related" | "suggestions" | "ideas";
+export type KeywordSource = KeywordResearchRequest["source"];
 export type KeywordMode = "auto" | KeywordSource;
 /**
  * Where research rows actually came from. "google_ads" is not requestable as

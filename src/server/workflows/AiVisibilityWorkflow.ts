@@ -1,3 +1,5 @@
+import { withProviderReference } from "@/server/providers/context";
+import { resolveProviderReference } from "@/server/providers/resolver";
 import {
   WorkflowEntrypoint,
   type WorkflowEvent,
@@ -62,6 +64,29 @@ export class AiVisibilityWorkflow extends WorkflowEntrypoint<
   AiVisibilityPayload
 > {
   async run(event: WorkflowEvent<AiVisibilityPayload>, step: WorkflowStep) {
+    let reference: Awaited<ReturnType<typeof resolveProviderReference>>;
+    try {
+      reference = await pgStep(
+        step,
+        "resolve-seo-provider",
+        SINGLE_ATTEMPT,
+        () => resolveProviderReference(event.payload.customer.organizationId),
+      );
+    } catch (error) {
+      const { payload } = event;
+      if ("runId" in payload)
+        await pgStep(step, "mark-failed", SINGLE_ATTEMPT, () =>
+          markAiRunFailed(payload.runId),
+        );
+      throw error;
+    }
+    return withProviderReference(reference, () => this.runScoped(event, step));
+  }
+
+  private async runScoped(
+    event: WorkflowEvent<AiVisibilityPayload>,
+    step: WorkflowStep,
+  ) {
     const { payload } = event;
     if ("setupProjectId" in payload)
       // No retries: each attempt is a paid model call. The user can retry.
@@ -98,7 +123,7 @@ export class AiVisibilityWorkflow extends WorkflowEntrypoint<
       let round: Awaited<ReturnType<typeof collectAiRound>>;
       try {
         round = await pgStep(step, `read-${name}`, COLLECT_STEP, () =>
-          collectAiRound(runId, remaining, canRetry),
+          collectAiRound(runId, remaining, canRetry, customer),
         );
       } catch (error) {
         // Posted tasks are already paid for; keep polling them next round.

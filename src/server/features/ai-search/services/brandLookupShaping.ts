@@ -8,7 +8,7 @@ import type {
   LlmAggregatedTotal,
   LlmMentionItem,
   LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 import { safeHostname, safeHttpUrl } from "@/shared/safe-url";
 import { deriveCitedSources } from "@/server/features/ai-search/services/citedSources";
 import {

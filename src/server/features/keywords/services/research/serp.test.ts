@@ -10,6 +10,16 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("cloudflare:workers", () => ({ waitUntil: vi.fn() }));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: vi.fn(async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-credentials",
+  })),
+}));
 
 vi.mock("@/server/lib/r2-cache", () => ({
   buildCacheKey: mocks.buildCacheKey,
@@ -78,6 +88,20 @@ function mockLiveSerp() {
 }
 
 describe("getSerpAnalysis cache depth", () => {
+  it("reports an organic response with no known positions as incomplete instead of rank zero or an empty SERP", async () => {
+    mocks.getCached.mockResolvedValue(null);
+    mocks.createDataforseoClient.mockReturnValue({
+      serp: {
+        live: vi
+          .fn()
+          .mockResolvedValue([{ type: "organic", title: "Unranked" }]),
+      },
+    });
+    await expect(
+      getSerpAnalysis({ ...input, depth: 20 }, billingCustomer),
+    ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
+    expect(mocks.setCached).not.toHaveBeenCalled();
+  });
   it("keeps a good snapshot when the deeper crawl comes back empty", async () => {
     mocks.getCached.mockResolvedValue(cachedSnapshot(20));
     mocks.createDataforseoClient.mockReturnValue({

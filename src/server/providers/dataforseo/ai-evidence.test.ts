@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDataforseoAnswer } from "./dataforseoEvidence";
+import { parseDataforseoAnswer } from "./ai-evidence";
 
 describe("DataForSEO answer evidence", () => {
   it("keeps safe cited pages without tracking parameters and drops citation pills from prose", () => {

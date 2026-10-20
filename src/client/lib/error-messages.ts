@@ -39,6 +39,15 @@ const STANDARD_MESSAGES: Record<ErrorCode, string> = {
     "The AI visibility request could not be completed. Review the tracking settings and try again.",
   DATAFORSEO_AUTH_FAILED:
     "DataForSEO rejected the API key. Check that DATAFORSEO_API_KEY is the base64 of your DataForSEO login:password.",
+  SEO_PROVIDER_NOT_CONFIGURED:
+    "The active SEO provider is not configured. Ask an administrator to check provider settings.",
+  SEO_PROVIDER_UNSUPPORTED: "Not supported by the active provider.",
+  SEO_PROVIDER_QUOTA_EXCEEDED:
+    "The connected SEO provider account has reached its balance or usage limit. Check the provider account.",
+  SEO_PROVIDER_TIMEOUT:
+    "The SEO provider timed out. Check the request status before trying again; it may have been billed.",
+  SEO_PROVIDER_CONFIGURATION_UNAVAILABLE:
+    "Provider settings are temporarily unavailable. Please try again.",
   RATE_LIMITED: "Too many requests. Please wait and try again.",
   UPSTREAM_UNAVAILABLE:
     "The data provider is temporarily unavailable. Please retry in a moment.",

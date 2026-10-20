@@ -1,3 +1,4 @@
+import { seoProviderResultSources } from "./seo-provider.schema";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -150,6 +151,10 @@ export const auditIssues = pgTable(
 export const auditLighthouseResults = pgTable(
   "audit_lighthouse_results",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: text("id").primaryKey(),
     auditId: text("audit_id")
       .notNull()

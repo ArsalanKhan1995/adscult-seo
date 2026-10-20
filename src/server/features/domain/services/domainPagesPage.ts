@@ -1,31 +1,17 @@
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
+import { fetchDomainPages } from "@/server/providers/domain";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
-import {
-  parseResearchTargetOrThrow,
-  toRelativePath,
-} from "@/server/lib/domainUtils";
-import {
-  buildRelevantPagesScopeFilter,
-  type ScopeFilter,
-} from "@/server/lib/dataforseo/researchScopeFilters";
-import { assertFilterConditionBudget } from "@/server/lib/dataforseo/filters";
+import { parseResearchTargetOrThrow } from "@/server/lib/domainUtils";
 import type { ResearchScope } from "@/shared/researchScope";
-import type { RelevantPagesItem } from "@/server/lib/dataforseo";
-import { computeHasMore } from "@/server/features/domain/services/pagination";
 import type { DomainKeywordsFilters } from "@/types/schemas/domain";
 
 const DOMAIN_PAGES_PAGE_TTL_SECONDS = 12 * 60 * 60;
 
 type DomainPagesSortMode = "traffic" | "keywords";
 type DomainPagesSortOrder = "asc" | "desc";
-
-const SORT_FIELD_BY_MODE: Record<DomainPagesSortMode, string> = {
-  traffic: "metrics.organic.etv",
-  keywords: "metrics.organic.count",
-};
 
 const domainPagesPageResultSchema = z.object({
   domain: z.string(),
@@ -46,93 +32,6 @@ const domainPagesPageResultSchema = z.object({
 
 type DomainPagesPageResult = z.infer<typeof domainPagesPageResultSchema>;
 
-function escapeLikeTerm(term: string): string {
-  return term.replace(/[\\%_]/g, (match) => `\\${match}`);
-}
-
-function pushAnd(filters: unknown[], expression: unknown[]) {
-  if (filters.length > 0) filters.push("and");
-  filters.push(expression);
-}
-
-function collectNumericRange(
-  out: unknown[][],
-  field: string,
-  min: number | undefined,
-  max: number | undefined,
-) {
-  if (typeof min === "number" && Number.isFinite(min)) {
-    out.push([field, ">=", min]);
-  }
-  if (typeof max === "number" && Number.isFinite(max)) {
-    out.push([field, "<=", max]);
-  }
-}
-
-function parseTerms(value: string | undefined): string[] {
-  if (!value) return [];
-  return value
-    .toLowerCase()
-    .split(/[,+]/)
-    .map((term) => term.trim())
-    .filter(Boolean);
-}
-
-function buildPageFilters(
-  filters: DomainKeywordsFilters,
-  searchTerm: string | undefined,
-  scopeFilter: ScopeFilter,
-): unknown[] {
-  const conditions: unknown[][] = [];
-
-  for (const term of parseTerms(filters.include)) {
-    conditions.push(["page_address", "ilike", `%${escapeLikeTerm(term)}%`]);
-  }
-  for (const term of parseTerms(filters.exclude)) {
-    conditions.push(["page_address", "not_ilike", `%${escapeLikeTerm(term)}%`]);
-  }
-
-  collectNumericRange(
-    conditions,
-    "metrics.organic.etv",
-    filters.minTraffic,
-    filters.maxTraffic,
-  );
-  collectNumericRange(
-    conditions,
-    "metrics.organic.count",
-    filters.minVol,
-    filters.maxVol,
-  );
-
-  const trimmed = searchTerm?.trim();
-  if (trimmed) {
-    conditions.push(["page_address", "ilike", `%${escapeLikeTerm(trimmed)}%`]);
-  }
-
-  assertFilterConditionBudget(scopeFilter.conditionCount + conditions.length);
-
-  const expressions: unknown[] = [];
-  for (const condition of [...scopeFilter.clauses, ...conditions]) {
-    pushAnd(expressions, condition);
-  }
-  return expressions;
-}
-
-function mapPageItem(item: RelevantPagesItem) {
-  const url = item.page_address ?? null;
-  if (!url) return null;
-  const organic = item.metrics?.organic ?? null;
-  const traffic = organic?.etv ?? null;
-  const keywords = organic?.count ?? null;
-  return {
-    page: url,
-    relativePath: toRelativePath(url),
-    organicTraffic: traffic != null ? Math.round(traffic) : null,
-    keywords: keywords != null ? Math.round(keywords) : null,
-  };
-}
-
 export async function getPagesPage(
   input: {
     projectId: string;
@@ -150,10 +49,7 @@ export async function getPagesPage(
   billingCustomer: BillingCustomerContext,
 ): Promise<DomainPagesPageResult> {
   const target = parseResearchTargetOrThrow(input.domain, input.scope);
-  const scopeFilter = buildRelevantPagesScopeFilter(target);
   const offset = (input.page - 1) * input.pageSize;
-  const orderBy = [`${SORT_FIELD_BY_MODE[input.sortMode]},${input.sortOrder}`];
-  const filters = buildPageFilters(input.filters, input.search, scopeFilter);
 
   const cacheKey = await buildCacheKey("domain:pages-page", {
     organizationId: billingCustomer.organizationId,
@@ -177,31 +73,15 @@ export async function getPagesPage(
     return cached.data;
   }
 
-  const dataforseo = createDataforseoClient(billingCustomer);
-  const response = await dataforseo.domain.relevantPages({
-    target: target.hostname,
-    locationCode: input.locationCode,
-    languageCode: input.languageCode,
-    limit: input.pageSize,
-    offset,
-    orderBy,
-    filters: filters.length > 0 ? filters : undefined,
-  });
-
-  const pages = response.items
-    .map(mapPageItem)
-    .filter(
-      (item): item is NonNullable<ReturnType<typeof mapPageItem>> =>
-        item != null,
-    );
-
-  const totalCount = response.totalCount;
-  const hasMore = computeHasMore(
-    offset,
-    response.items.length,
-    totalCount,
-    input.pageSize,
+  const response = unwrapProviderResult(
+    await fetchDomainPages(billingCustomer, {
+      ...input,
+      limit: input.pageSize,
+      offset,
+    }),
   );
+  const pages = response.items;
+  const { totalCount, hasMore } = response;
 
   const result: DomainPagesPageResult = {
     domain: target.hostname,

@@ -66,6 +66,7 @@ export function AuthenticatedAppLayout({
   // neither: a banner there would link to the page the user is already on.
   const shouldCheckSeoApiKeyStatus =
     location.pathname !== BILLING_ROUTE &&
+    !location.pathname.startsWith("/settings") &&
     location.pathname !== dataforseoHelpLinkOptions.to;
   const seoApiKeyStatusQuery = useQuery({
     queryKey: ["seoApiKeyStatus"],

@@ -19,6 +19,18 @@ describe("parseTaskItems", () => {
 });
 
 describe("assertOk", () => {
+  it.each([
+    [40100, "DATAFORSEO_AUTH_FAILED"],
+    [40200, "SEO_PROVIDER_QUOTA_EXCEEDED"],
+    [40202, "RATE_LIMITED"],
+  ])(
+    "classifies vendor account failure %s without treating it as a charged data result",
+    (status, code) => {
+      expect(() =>
+        assertOk({ status_code: 20000, tasks: [{ status_code: status }] }),
+      ).toThrow(expect.objectContaining({ code }));
+    },
+  );
   it("throws DataforseoChargedTaskError when a charged task fails", () => {
     const task = {
       status_code: 40000,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ParsedAiAnswer } from "../providers/dataforseoEvidence";
+import type { ParsedAiAnswer } from "@/server/providers/contracts/ai-answer";
 import {
   aiMentionSpans,
   aiPromptIsBranded,
