@@ -9,14 +9,10 @@ import {
 import type { ScopeFilter } from "@/server/lib/dataforseo/researchScopeFilters";
 import type { DomainKeywordsFilters } from "@/types/schemas/domain";
 
-export type DomainKeywordsSortMode =
-  | "rank"
-  | "traffic"
-  | "volume"
-  | "score"
-  | "cpc";
-export type DomainKeywordsSortOrder = "asc" | "desc";
-
+import type {
+  DomainKeywordsSortMode,
+  DomainKeywordsSortOrder,
+} from "@/server/providers/contracts/domain";
 const SORT_FIELD_BY_MODE: Record<DomainKeywordsSortMode, string> = {
   rank: "ranked_serp_element.serp_item.rank_absolute",
   traffic: "ranked_serp_element.serp_item.etv",
@@ -43,6 +39,7 @@ export function buildKeywordFilters(
   filters: DomainKeywordsFilters,
   searchTerm?: string,
   scopeFilter?: ScopeFilter,
+  excludeBrandTerms?: string[],
 ): unknown[] {
   const conditions: FilterClause[] = [];
 
@@ -92,6 +89,9 @@ export function buildKeywordFilters(
     filters.maxRank,
   );
 
+  for (const term of excludeBrandTerms ?? []) {
+    conditions.push(["keyword_data.keyword", "not_ilike", `%${term}%`]);
+  }
   const trimmedSearch = searchTerm?.trim();
   const searchGroup = trimmedSearch ? buildSearchGroup(trimmedSearch) : null;
 

@@ -1,3 +1,6 @@
+import { fetchAiMentions } from "@/server/providers/ai-research";
+import { fetchSerp } from "@/server/providers/serp";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { waitUntil } from "cloudflare:workers";
 import { sortBy } from "remeda";
 import { getDomain } from "tldts";
@@ -7,7 +10,6 @@ import { assertPaidAiSearchPlan } from "@/server/features/ai-search/services/acc
 import {
   CHATGPT_LANGUAGE_CODE,
   CHATGPT_LOCATION_CODE,
-  createDataforseoClient,
 } from "@/server/lib/dataforseo";
 import { AppError } from "@/server/lib/errors";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
@@ -60,7 +62,7 @@ const GENERIC_DOMAINS = new Set([
 const cachedPromptSchema = z.object({
   question: z.string(),
   answer: z.string(),
-  volume: z.number(),
+  volume: z.number().nullable(),
   sources: z.array(
     z.object({
       domain: z.string(),
@@ -162,22 +164,22 @@ async function loadPrompts(
   },
   customer: BillingCustomerContext,
 ): Promise<CachedResearch> {
-  const cacheKey = await buildCacheKey("ai-visibility:prompt-research", {
+  const cacheKey = await buildCacheKey("ai-visibility:prompt-research:v2", {
     organizationId: customer.organizationId,
     ...request,
   });
   const cached = cachedResearchSchema.safeParse(await getCached(cacheKey));
   if (cached.success) return cached.data;
 
-  const client = createDataforseoClient(customer);
   // Answers often use the category words when the question doesn't. Short
   // keywords match as a phrase; longer ones rarely appear verbatim.
   const [data, serp] = await Promise.all([
-    client.aiSearch.mentionsSearch({
+    fetchAiMentions(customer, {
       target: {
-        keyword: request.topic,
-        search_scope: ["question", "answer"],
-        match_type:
+        type: "keyword",
+        value: request.topic,
+        searchScope: ["question", "answer"],
+        matchType:
           words(request.topic).length <= 3 ? "partial_match" : "word_match",
       },
       platform: request.platform,
@@ -185,16 +187,16 @@ async function loadPrompts(
       languageCode: request.languageCode,
       limit: RESEARCH_LIMIT,
       orderBy: ["ai_search_volume,desc"],
-    }),
+    }).then((result) => unwrapProviderResult(result).rows),
     // The SERP only sharpens the on-topic filter. When DataForSEO's search is
     // down, keep the paid prompt data and filter by phrase and brand domains.
-    client.serp
-      .live({
-        keyword: request.topic,
-        locationCode: request.locationCode,
-        languageCode: request.languageCode,
-        depth: RESEARCH_SERP_DEPTH,
-      })
+    fetchSerp(customer, {
+      keyword: request.topic,
+      locationCode: request.locationCode,
+      languageCode: request.languageCode,
+      depth: RESEARCH_SERP_DEPTH,
+    })
+      .then((result) => unwrapProviderResult(result).rows)
       .catch((error: unknown) => {
         if (
           error instanceof AppError &&
@@ -211,7 +213,7 @@ async function loadPrompts(
           {
             question: item.question.trim(),
             answer: item.answer ?? "",
-            volume: item.ai_search_volume ?? 0,
+            volume: item.ai_search_volume ?? null,
             sources: (item.sources ?? []).flatMap((source) =>
               source.domain && source.url
                 ? [
@@ -240,7 +242,9 @@ async function loadPrompts(
     serpDomains: [
       ...new Set(
         (serp ?? []).flatMap((item) =>
-          item.type === "organic" ? (registrableDomain(item.domain) ?? []) : [],
+          item.resultType === "organic"
+            ? (registrableDomain(item.domain) ?? [])
+            : [],
         ),
       ),
     ].filter((domain) => !GENERIC_DOMAINS.has(domain)),
@@ -299,7 +303,10 @@ function asksPhrase(question: string, keyword: string) {
 
 function mergeNearDuplicates(prompts: CachedPrompt[]): CachedPrompt[][] {
   const groups = new Map<string, CachedPrompt[]>();
-  for (const prompt of sortBy(prompts, [(item) => item.volume, "desc"])) {
+  for (const prompt of sortBy(prompts, [
+    (item) => item.volume ?? -Infinity,
+    "desc",
+  ])) {
     const key = mergeKey(prompt.question);
     groups.set(key, [...(groups.get(key) ?? []), prompt]);
   }

@@ -1,3 +1,4 @@
+import { withProviderScope } from "@/server/providers/context";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("cloudflare:workers", () => ({ waitUntil: vi.fn() }));
@@ -40,7 +41,10 @@ vi.mock("../repositories/AiVisibilityRepository", () => ({
 }));
 
 import { AppError } from "@/server/lib/errors";
-import { listAiResearchKeywords, researchAiPrompts } from "./aiPromptResearch";
+import {
+  listAiResearchKeywords,
+  researchAiPrompts as researchAiPromptsInRequest,
+} from "./aiPromptResearch";
 import { customer } from "./aiVisibilityTestFixtures";
 
 const input = { projectId: "project", keyword: "seo tool" } as const;
@@ -175,3 +179,23 @@ describe("listAiResearchKeywords", () => {
     expect(result.keywords).toEqual(["rank tracker", "seo tool", "backlinks"]);
   });
 });
+
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
+
+// Match the authenticated request scope while the two provider calls run in parallel.
+function researchAiPrompts(
+  ...args: Parameters<typeof researchAiPromptsInRequest>
+) {
+  return withProviderScope(args[1].organizationId, () =>
+    researchAiPromptsInRequest(...args),
+  );
+}

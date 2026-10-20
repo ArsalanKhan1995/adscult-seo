@@ -17,10 +17,14 @@ async function start(
   try {
     if (!domain || (await AuditRepository.getLatestAuditForProject(projectId)))
       return null;
-    key = await buildCacheKey("dashboard:first-audit", {
-      projectId,
-      organizationId: customer.organizationId,
-    });
+    key = await buildCacheKey(
+      "dashboard:first-audit",
+      {
+        projectId,
+        organizationId: customer.organizationId,
+      },
+      { seoProvider: false },
+    );
     token = await DataRefreshClaimRepository.claim(
       key,
       customer.organizationId,

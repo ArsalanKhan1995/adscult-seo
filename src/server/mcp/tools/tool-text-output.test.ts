@@ -1,3 +1,13 @@
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
 /* eslint-disable max-lines, max-lines-per-function -- one spec covers every service-backed MCP text table */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reverse } from "remeda";
@@ -496,3 +506,7 @@ describe("MCP tool text output (service-backed tools)", () => {
     );
   });
 });
+
+vi.mock("@/server/providers/task-context", () => ({
+  resolveTaskExecution: async (_path: string, current: unknown) => current,
+}));

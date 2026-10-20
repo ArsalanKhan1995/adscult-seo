@@ -1,3 +1,4 @@
+import { recordProviderResultSource } from "@/server/providers/result-source";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import type { InferInsertModel } from "drizzle-orm";
 import { db } from "@/db";
@@ -98,6 +99,8 @@ export async function insertSnapshots(
     Omit<InferInsertModel<typeof rankSnapshots>, "id" | "checkedAt">
   >,
 ) {
+  const providerResultSourceId =
+    await recordProviderResultSource("serp.rankCheck");
   // Target the (run, keyword, device) unique index explicitly. An UNtargeted
   // ON CONFLICT DO NOTHING also swallows a primary-key collision, which would
   // silently drop every row if the `id` serial sequence ever drifts behind
@@ -107,7 +110,7 @@ export async function insertSnapshots(
   await executeInBatches(snapshots, (tx, snapshot) =>
     tx
       .insert(rankSnapshots)
-      .values(snapshot)
+      .values({ ...snapshot, providerResultSourceId })
       .onConflictDoNothing({
         target: [
           rankSnapshots.runId,

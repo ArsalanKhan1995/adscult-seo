@@ -1,9 +1,12 @@
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import {
-  createDataforseoClient,
   SERP_ANALYSIS_DEPTH,
-} from "@/server/lib/dataforseo";
+  serpScopeSchema,
+  serpProvenanceSchema,
+} from "@/server/providers/contracts/serp";
+import { fetchSerp } from "@/server/providers/serp";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { buildProjectMeta } from "@/server/mcp/context";
@@ -42,6 +45,11 @@ const serpItemSchema = z
   .passthrough();
 
 type SerpItem = z.infer<typeof serpItemSchema>;
+const serpCacheSchema = z.object({
+  items: z.array(serpItemSchema),
+  scope: serpScopeSchema,
+  provenance: serpProvenanceSchema,
+});
 
 // `type` is load-bearing: the advanced SERP is a mixed list, so without it a
 // featured_snippet or people_also_ask row (which has no domain/title/url) reads
@@ -138,7 +146,6 @@ export const getSerpResultsTool = {
     },
   },
   handler: withMcpProjectAuth(async (args: Args, context) => {
-    const client = createDataforseoClient(context.billing);
     const depth = args.depth ?? SERP_ANALYSIS_DEPTH;
     const results = await Promise.all(
       args.queries.map(async (q) => {
@@ -150,7 +157,7 @@ export const getSerpResultsTool = {
               q.locationName,
             );
           }
-          const cacheKey = await buildCacheKey("mcp:serp-results", {
+          const cacheKey = await buildCacheKey("mcp:serp-results:v2", {
             organizationId: context.billing.organizationId,
             projectId: args.projectId,
             keyword: q.keyword,
@@ -161,35 +168,38 @@ export const getSerpResultsTool = {
             // rows cached before the device option existed.
             device: q.device === "mobile" ? "mobile" : undefined,
           });
-          const cached = z
-            .array(serpItemSchema)
-            .safeParse(await getCached(cacheKey));
+          const cached = serpCacheSchema.safeParse(await getCached(cacheKey));
           if (cached.success) {
             return {
               keyword: q.keyword,
               ok: true as const,
-              items: cached.data,
+              ...cached.data,
             };
           }
 
-          const items = await client.serp.live({
+          const batch = await fetchSerp(context.billing, {
             keyword: q.keyword,
             ...market,
             locationName: q.locationName,
             depth,
             device: q.device,
           });
+          const response = unwrapProviderResult(batch);
           // Trim noise — return only essentials per item.
-          const trimmed = items.slice(0, depth).map((item) => ({
-            type: item.type,
-            rank: item.rank_absolute ?? item.rank_group ?? null,
-            organicRank:
-              item.type === "organic" ? (item.rank_group ?? null) : null,
+          const trimmed = response.rows.slice(0, depth).map((item) => ({
+            type: item.resultType,
+            rank: item.absolutePosition ?? item.groupPosition,
+            organicRank: item.organicPosition,
             title: item.title ?? null,
             url: item.url ?? null,
             domain: item.domain ?? null,
             description: item.description ?? null,
           }));
+          const snapshot = {
+            items: trimmed,
+            scope: response.scope,
+            provenance: serpProvenanceSchema.parse(batch.meta),
+          };
           // DataForSEO reports "no results" transiently; don't pin that for
           // the whole window. waitUntil, not void: workerd cancels
           // unregistered pending I/O once the response is sent.
@@ -197,14 +207,14 @@ export const getSerpResultsTool = {
             waitUntil(
               setCached(
                 cacheKey,
-                trimmed,
+                snapshot,
                 SERP_RESULTS_CACHE_TTL_SECONDS,
               ).catch((error) => {
                 console.error("mcp.serp-results.cache-write failed:", error);
               }),
             );
           }
-          return { keyword: q.keyword, ok: true as const, items: trimmed };
+          return { keyword: q.keyword, ok: true as const, ...snapshot };
         } catch (error) {
           return {
             keyword: q.keyword,

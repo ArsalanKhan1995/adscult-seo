@@ -10,6 +10,7 @@ import {
   aiMatches,
   projects,
   projectCompetitors,
+  seoProviderResultSources,
 } from "@/db/schema";
 import {
   getTracker,
@@ -89,6 +90,7 @@ async function getActiveRun(trackerId: string) {
 
 const observationColumns = {
   id: aiObservations.id,
+  providerResultSourceId: aiObservations.providerResultSourceId,
   runId: aiObservations.runId,
   promptId: aiObservations.promptId,
   engine: aiObservations.engine,
@@ -243,6 +245,49 @@ async function claimDueTracker(input: {
 }
 
 export const AiVisibilityRepository = {
+  getResultSources: async (projectId: string, observationIds: string[]) => {
+    const rows = [];
+    for (let offset = 0; offset < observationIds.length; offset += 80) {
+      rows.push(
+        ...(await db
+          .select({
+            observationId: aiObservations.id,
+            provider: seoProviderResultSources.provider,
+            upstreamVendor: seoProviderResultSources.upstreamVendor,
+            operation: seoProviderResultSources.operation,
+            revision: seoProviderResultSources.revision,
+            contractVersion: seoProviderResultSources.contractVersion,
+            fetchedAt: seoProviderResultSources.fetchedAt,
+          })
+          .from(aiObservations)
+          .innerJoin(aiRuns, eq(aiRuns.id, aiObservations.runId))
+          .innerJoin(projects, eq(projects.id, aiRuns.projectId))
+          .innerJoin(
+            seoProviderResultSources,
+            and(
+              eq(
+                seoProviderResultSources.id,
+                aiObservations.providerResultSourceId,
+              ),
+              eq(
+                seoProviderResultSources.organizationId,
+                projects.organizationId,
+              ),
+            ),
+          )
+          .where(
+            and(
+              eq(aiRuns.projectId, projectId),
+              inArray(
+                aiObservations.id,
+                observationIds.slice(offset, offset + 80),
+              ),
+            ),
+          )),
+      );
+    }
+    return rows;
+  },
   listResearchKeywords: async (projectId: string) =>
     (
       (

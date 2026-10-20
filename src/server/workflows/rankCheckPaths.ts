@@ -1,16 +1,19 @@
 import type { WorkflowStep } from "cloudflare:workers";
 import { RankTrackingRepository } from "@/server/features/rank-tracking/repositories/RankTrackingRepository";
-import {
-  fetchRankCheckTaskResult,
-  MAX_TASKS_PER_POST,
-} from "@/server/lib/dataforseo";
+import { MAX_TASKS_PER_POST } from "@/server/lib/dataforseo/shared";
+import type { BillingCustomerContext } from "@/server/billing/subscription";
 import type {
-  createDataforseoClient,
   PostedRankCheckTask,
   RankCheckResult,
   RankCheckTaskInput,
-} from "@/server/lib/dataforseo";
-import { AppError } from "@/server/lib/errors";
+} from "@/server/providers/contracts/rank-check";
+import {
+  fetchRankChecks,
+  postRankTasks,
+  collectRankTask,
+} from "@/server/providers/rank-check";
+import { unwrapProviderResult } from "@/server/providers/operation";
+import { AppError, asAppError } from "@/server/lib/errors";
 import type { RankTrackingConfig } from "@/types/schemas/rank-tracking";
 import { KEYWORDS_PER_BATCH } from "@/shared/rank-tracking";
 import { pgStep } from "@/server/workflows/pgStep";
@@ -42,7 +45,7 @@ function mapResultsToSnapshotRows(
 }
 
 interface CheckContext {
-  client: ReturnType<typeof createDataforseoClient>;
+  billingCustomer: BillingCustomerContext;
   keywords: KeywordEntry[];
   devices: RankTrackingConfig["devices"];
   serpDepth: number;
@@ -87,7 +90,8 @@ async function checkBatchLive(
 ): Promise<number> {
   let settled: PromiseSettledResult<RankCheckResult>[];
   try {
-    settled = await ctx.client.serp.rankCheckBatch(
+    const batch = await fetchRankChecks(
+      ctx.billingCustomer,
       tasks.map((task) => ({
         keyword: task.keyword,
         keywordId: task.keywordId,
@@ -99,6 +103,16 @@ async function checkBatchLive(
         depth: ctx.serpDepth,
       })),
     );
+    settled = unwrapProviderResult(batch).items.map((item) => {
+      try {
+        return {
+          status: "fulfilled" as const,
+          value: unwrapProviderResult({ ...item.result, meta: batch.meta }),
+        };
+      } catch (reason) {
+        return { status: "rejected" as const, reason };
+      }
+    });
   } catch (error) {
     settled = tasks.map(() => ({ status: "rejected", reason: error }));
   }
@@ -279,12 +293,12 @@ async function collectQueuedRound(
     const chunk = tasks.slice(i, i + TASK_GET_CONCURRENCY);
     const settled = await Promise.allSettled(
       chunk.map((task) =>
-        fetchRankCheckTaskResult({
+        collectRankTask(ctx.billingCustomer, {
           taskId: task.taskId,
           keywordId: task.keywordId,
           keyword: task.keyword,
           targetDomain: ctx.domain,
-        }),
+        }).then(unwrapProviderResult),
       ),
     );
     settled.forEach((result, index) => {
@@ -364,8 +378,8 @@ export async function runQueuedCheck(
 ): Promise<QueuedCheckStats> {
   // Post all tasks to the queue, <=100 per request, one metered step each.
   // A failed chunk must not abort the run — earlier chunks were already
-  // charged at DataForSEO, so their results have to be collected. The failed
-  // chunk's pairs go to the live fallback instead.
+  // charged at DataForSEO, so their results have to be collected. A chunk
+  // with an uncertain submission is left unchecked rather than bought again.
   let pending: PostedRankCheckTask[] = [];
   const fallback: RankCheckTaskInput[] = [];
   for (let i = 0; i < taskInputs.length; i += MAX_TASKS_PER_POST) {
@@ -378,21 +392,26 @@ export async function runQueuedCheck(
         `post-tasks-${postIndex}`,
         SINGLE_ATTEMPT_STEP_CONFIG,
         async () =>
-          ctx.client.serp.rankCheckTaskPost({
+          postRankTasks(ctx.billingCustomer, {
             tasks: chunk,
             locationCode: ctx.locationCode,
             languageCode: ctx.languageCode,
             locationName: ctx.locationName,
             depth: ctx.serpDepth,
             targetDomain: ctx.domain,
-          }),
+          }).then((result) => unwrapProviderResult(result).tasks),
       );
     } catch (error) {
       console.warn(
         `[rank-check] ${ctx.runId} post-tasks-${postIndex} failed:`,
         error,
       );
-      fallback.push(...chunk);
+      // A thrown submission may already have created and charged tasks. Only
+      // explicit per-task rejections below are safe to send to live fallback.
+      await RankTrackingRepository.setRunErrorIfEmpty(
+        ctx.runId,
+        asAppError(error)?.code ?? "UPSTREAM_UNAVAILABLE",
+      );
       continue;
     }
     pending.push(...posted);

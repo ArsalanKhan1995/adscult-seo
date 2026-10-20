@@ -1,8 +1,8 @@
+import { fetchLocalKeywordVolumes } from "@/server/providers/keyword-research";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import type { CreditFeature } from "@/shared/billing-credit-features";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
-import { fetchAdsSearchVolumeForKeywords } from "@/server/lib/dataforseo/keyword-metrics";
-import { fetchSerpLocationsForCountry } from "@/server/lib/dataforseo/serp-locations";
+import { fetchSearchLocations } from "@/server/providers/search-locations";
 import { AppError } from "@/server/lib/errors";
 import {
   LOCATION_OPTIONS,
@@ -10,7 +10,6 @@ import {
   getIsoCountryCode,
 } from "@/shared/keyword-locations";
 import type { EnrichedKeyword } from "./helpers";
-import { mapAdsKeywordItems } from "./research-data";
 
 /**
  * Reject a location that is not a city, county, or region of the country
@@ -21,8 +20,8 @@ export async function assertLocalResearchLocation(
   locationCode: number,
   locationName: string,
 ): Promise<void> {
-  const locations = await fetchSerpLocationsForCountry(
-    getIsoCountryCode(locationCode),
+  const { locations } = unwrapProviderResult(
+    await fetchSearchLocations(getIsoCountryCode(locationCode)),
   );
   if (locations.some((location) => location.locationName === locationName)) {
     return;
@@ -56,12 +55,14 @@ export async function localizeResearchRows(
 ): Promise<EnrichedKeyword[]> {
   // Research results cap at 500 rows, under the endpoint's 1,000 keyword
   // limit, so one call covers them.
-  const items = await fetchAdsSearchVolumeForKeywords(
-    createDataforseoClient(billingCustomer),
-    { ...params, keywords: rows.map((row) => row.keyword) },
-  );
+  const localRows = unwrapProviderResult(
+    await fetchLocalKeywordVolumes(billingCustomer, {
+      ...params,
+      keywords: rows.map((row) => row.keyword),
+    }),
+  ).rows;
   const localByKeyword = new Map(
-    mapAdsKeywordItems(items).map((local) => [local.keyword, local]),
+    localRows.map((local) => [local.keyword, local]),
   );
 
   return rows.map((row) => {

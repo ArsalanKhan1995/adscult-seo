@@ -4,7 +4,7 @@ import type {
   LlmCrossAggregatedItem,
   LlmMentionItem,
   LlmTopPagesItem,
-} from "@/server/lib/dataforseoLlmSchemas";
+} from "@/server/providers/contracts/ai-research";
 import { brandLookupResultSchema } from "@/types/schemas/ai-search";
 import { parseResearchTarget } from "@/shared/researchScope";
 

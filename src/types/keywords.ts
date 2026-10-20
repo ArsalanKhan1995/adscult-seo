@@ -8,7 +8,7 @@ export type KeywordIntent =
 export type MonthlySearch = {
   year: number;
   month: number;
-  searchVolume: number;
+  searchVolume: number | null;
 };
 
 export type KeywordResearchRow = {

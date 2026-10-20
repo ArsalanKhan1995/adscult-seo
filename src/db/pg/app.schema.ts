@@ -1,3 +1,4 @@
+import { seoProviderResultSources } from "./seo-provider.schema";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -175,6 +176,10 @@ export const savedKeywordTagAssignments = pgTable(
 export const keywordMetrics = pgTable(
   "keyword_metrics",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: serial("id").primaryKey(),
     projectId: text("project_id")
       .notNull()
@@ -259,6 +264,10 @@ export const rankTrackingConfigs = pgTable(
 export const rankTrackingKeywords = pgTable(
   "rank_tracking_keywords",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: text("id").primaryKey(),
     configId: text("config_id")
       .notNull()
@@ -325,6 +334,10 @@ export const rankCheckRuns = pgTable(
 export const rankSnapshots = pgTable(
   "rank_snapshots",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: serial("id").primaryKey(),
     runId: text("run_id")
       .notNull()

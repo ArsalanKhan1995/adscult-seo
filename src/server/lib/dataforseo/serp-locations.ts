@@ -1,3 +1,4 @@
+import { getScopedProviderExecution } from "@/server/providers/context";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 import { dataforseoGet } from "@/server/lib/dataforseo/core";
@@ -42,8 +43,16 @@ const KV_TTL_SECONDS = 30 * 24 * 60 * 60;
 /** Edge-cache hot reads so repeat searches skip the central KV store. */
 const KV_HOT_READ_TTL_SECONDS = 24 * 60 * 60;
 
-function cacheKey(iso: string): string {
-  return `serp-locations:${iso}`;
+async function cacheKey(iso: string): Promise<string> {
+  const execution = await getScopedProviderExecution();
+  return [
+    "serp.locations:v1",
+    execution?.organizationId ?? "installation",
+    execution?.provider ?? "dataforseo",
+    execution?.revision ?? 0,
+    execution?.credentialVersion ?? "environment",
+    iso,
+  ].join(":");
 }
 
 /**
@@ -61,14 +70,15 @@ export async function fetchSerpLocationsForCountry(
 ): Promise<SerpLocationResult[]> {
   const iso = countryCode.toLowerCase();
 
-  const cached = await env.KV.get(cacheKey(iso), {
+  const key = await cacheKey(iso);
+  const cached = await env.KV.get(key, {
     type: "json",
     cacheTtl: KV_HOT_READ_TTL_SECONDS,
   });
   const hit = cachedLocationsSchema.safeParse(cached);
   if (hit.success) return hit.data;
 
-  return fillFromOrigin(iso);
+  return fillFromOrigin(iso, key);
 }
 
 // Coalesce concurrent cold fills within an isolate: the prewarm fired on
@@ -78,19 +88,22 @@ export async function fetchSerpLocationsForCountry(
 // failed fill — e.g. the owning request got cancelled — isn't sticky).
 const inflightFills = new Map<string, Promise<SerpLocationResult[]>>();
 
-function fillFromOrigin(iso: string): Promise<SerpLocationResult[]> {
-  const inflight = inflightFills.get(iso);
+function fillFromOrigin(
+  iso: string,
+  key: string,
+): Promise<SerpLocationResult[]> {
+  const inflight = inflightFills.get(key);
   if (inflight) return inflight;
 
   const fill = fetchFromDataforseo(iso)
     .then(async (fresh) => {
-      await env.KV.put(cacheKey(iso), JSON.stringify(fresh), {
+      await env.KV.put(key, JSON.stringify(fresh), {
         expirationTtl: KV_TTL_SECONDS,
       });
       return fresh;
     })
-    .finally(() => inflightFills.delete(iso));
-  inflightFills.set(iso, fill);
+    .finally(() => inflightFills.delete(key));
+  inflightFills.set(key, fill);
   return fill;
 }
 

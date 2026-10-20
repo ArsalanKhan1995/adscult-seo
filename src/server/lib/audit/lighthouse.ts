@@ -1,6 +1,7 @@
 import { detectUrlTemplate, canonicalUrlKey } from "./url-utils";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
+import { fetchLighthouse } from "@/server/providers/lighthouse";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import type { LighthouseResult, LighthouseStrategy } from "./types";
 import type { PageFetchClass } from "@/shared/audit-fetch-class";
 import { putTextToR2 } from "@/server/lib/r2";
@@ -56,9 +57,10 @@ export async function fetchLighthouseResult(
   strategy: "mobile" | "desktop",
   billingCustomer: BillingCustomerContext,
 ): Promise<LighthouseFetchResult> {
-  const dataforseo = createDataforseoClient(billingCustomer);
   try {
-    const data = await dataforseo.lighthouse.live({ url, strategy });
+    const { report: data } = unwrapProviderResult(
+      await fetchLighthouse(billingCustomer, { url, strategy }),
+    );
 
     return {
       result: {

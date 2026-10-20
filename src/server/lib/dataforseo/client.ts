@@ -1,3 +1,4 @@
+import { withProviderScope } from "@/server/providers/context";
 import { waitUntil } from "cloudflare:workers";
 import {
   type CreditFeature,
@@ -331,6 +332,17 @@ export function createDataforseoClient(customer: BillingCustomerContext) {
  * drop charges.
  */
 async function meterDataforseoCalls<T>(
+  customer: BillingCustomerContext,
+  executes: Array<() => Promise<DataforseoApiResponse<T>>>,
+  callCredits: number[],
+  creditFeature?: CreditFeature,
+): Promise<PromiseSettledResult<T>[]> {
+  return withProviderScope(customer.organizationId, () =>
+    meterScopedDataforseoCalls(customer, executes, callCredits, creditFeature),
+  );
+}
+
+async function meterScopedDataforseoCalls<T>(
   customer: BillingCustomerContext,
   executes: Array<() => Promise<DataforseoApiResponse<T>>>,
   callCredits: number[],

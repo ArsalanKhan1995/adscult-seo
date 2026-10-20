@@ -69,41 +69,41 @@ async function upsertKeywordMetric(params: {
   keywordDifficulty: number | null;
   intent: string | null;
   monthlySearchesJson: string;
+  providerResultSourceId?: string | null;
+  onlyIfMissing?: boolean;
 }) {
-  const fetchedAt = new Date().toISOString();
-
-  await db
-    .insert(keywordMetrics)
-    .values({
-      projectId: params.projectId,
-      keyword: params.keyword,
-      locationCode: params.locationCode,
-      languageCode: params.languageCode,
-      searchVolume: params.searchVolume,
-      cpc: params.cpc,
-      competition: params.competition,
-      keywordDifficulty: params.keywordDifficulty,
-      intent: params.intent,
-      monthlySearches: params.monthlySearchesJson,
-      fetchedAt,
-    })
-    .onConflictDoUpdate({
+  const values = {
+    searchVolume: params.searchVolume,
+    cpc: params.cpc,
+    competition: params.competition,
+    keywordDifficulty: params.keywordDifficulty,
+    intent: params.intent,
+    monthlySearches: params.monthlySearchesJson,
+    fetchedAt: new Date().toISOString(),
+    providerResultSourceId: params.providerResultSourceId ?? null,
+  };
+  const insert = db.insert(keywordMetrics).values({
+    ...values,
+    projectId: params.projectId,
+    keyword: params.keyword,
+    locationCode: params.locationCode,
+    languageCode: params.languageCode,
+  });
+  // A browser saving displayed metrics must not overwrite a trusted provider
+  // result (or its original provenance) already collected on the server.
+  if (params.onlyIfMissing) {
+    await insert.onConflictDoNothing();
+  } else {
+    await insert.onConflictDoUpdate({
       target: [
         keywordMetrics.projectId,
         keywordMetrics.keyword,
         keywordMetrics.locationCode,
         keywordMetrics.languageCode,
       ],
-      set: {
-        searchVolume: params.searchVolume,
-        cpc: params.cpc,
-        competition: params.competition,
-        keywordDifficulty: params.keywordDifficulty,
-        intent: params.intent,
-        monthlySearches: params.monthlySearchesJson,
-        fetchedAt,
-      },
+      set: values,
     });
+  }
 }
 
 async function countSavedKeywords(projectId: string) {

@@ -1,9 +1,8 @@
+import { unwrapProviderResult } from "@/server/providers/operation";
+import { recordProviderResultSource } from "@/server/providers/result-source";
 import { KeywordResearchRepository } from "@/server/features/keywords/repositories/KeywordResearchRepository";
 import { normalizeIntent } from "@/server/features/keywords/services/research/helpers";
-import {
-  createDataforseoClient,
-  fetchKeywordMetricsForList,
-} from "@/server/lib/dataforseo";
+import { fetchKeywordMetrics } from "@/server/providers/keyword-metrics";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import type { RefreshSavedKeywordMetricsInput } from "@/types/schemas/keywords";
 
@@ -15,15 +14,15 @@ const REFRESH_UPSERT_BATCH_SIZE = 100;
 export async function refreshSavedKeywordMetrics(
   input: RefreshSavedKeywordMetricsInput,
   billingCustomer: BillingCustomerContext,
-): Promise<{ updated: number }> {
+): Promise<{ updated: number; failed: number }> {
   const { rows } = await KeywordResearchRepository.listSavedKeywordsByProject({
     projectId: input.projectId,
   });
 
-  if (rows.length === 0) return { updated: 0 };
+  if (rows.length === 0) return { updated: 0, failed: 0 };
 
-  const client = createDataforseoClient(billingCustomer);
   let updated = 0;
+  let failed = 0;
 
   // Group by (locationCode, languageCode) so each provider call is homogeneous.
   const groups = new Map<string, typeof rows>();
@@ -36,12 +35,19 @@ export async function refreshSavedKeywordMetrics(
 
   for (const groupRows of groups.values()) {
     const { locationCode, languageCode } = groupRows[0].row;
-    const metrics = await fetchKeywordMetricsForList(client, {
+    const batch = await fetchKeywordMetrics(billingCustomer, {
       keywords: groupRows.map((r) => r.row.keyword),
       locationCode,
       languageCode,
       creditFeature: "keyword_research",
     });
+    const data = unwrapProviderResult(batch);
+    const metrics = data.items.flatMap(({ result }) =>
+      result.ok ? [result.data] : [],
+    );
+    failed += data.items.length - metrics.length;
+    const providerResultSourceId =
+      await recordProviderResultSource("keywords.metrics");
     const byKeyword = new Map(
       metrics.map((metric) => [metric.keyword.toLowerCase(), metric]),
     );
@@ -53,6 +59,7 @@ export async function refreshSavedKeywordMetrics(
           const metric = byKeyword.get(r.row.keyword.toLowerCase());
           if (!metric) return Promise.resolve();
           return KeywordResearchRepository.upsertKeywordMetric({
+            providerResultSourceId,
             projectId: input.projectId,
             keyword: r.row.keyword,
             locationCode,
@@ -71,5 +78,5 @@ export async function refreshSavedKeywordMetrics(
     updated += byKeyword.size;
   }
 
-  return { updated };
+  return { updated, failed };
 }

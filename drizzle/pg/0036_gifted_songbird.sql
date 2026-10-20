@@ -1,0 +1,2 @@
+ALTER TABLE "rank_tracking_keywords" ADD COLUMN "provider_result_source_id" text;--> statement-breakpoint
+ALTER TABLE "rank_tracking_keywords" ADD CONSTRAINT "rank_tracking_keywords_provider_result_source_id_seo_provider_result_sources_id_fk" FOREIGN KEY ("provider_result_source_id") REFERENCES "public"."seo_provider_result_sources"("id") ON DELETE no action ON UPDATE no action;

@@ -1,6 +1,8 @@
 # PLAN.md — Pluggable SEO Providers with an Admin Switcher
 
-Status: implementation plan; application code has not been changed or tested.
+Status: DataForSEO adapter migration and administrator configuration are implemented and regression-checked. Treg live validation and deployment gates remain unverified. See [the implementation handoff](docs/maintainers/provider-implementation.md) for evidence and limitations.
+Treg follow-up: free account authentication passed with the supplied test token. The user authorized free checks only; paid SEO contracts and billing remain unverified, so Treg activation stays disabled.
+
 Target: OpenSEO (`every-app/open-seo`).
 Goal: support DataForSEO directly and verified SEO operations through Treg, with an administrator-controlled switch that does not require an application restart.
 
@@ -9,6 +11,7 @@ Goal: support DataForSEO directly and verified SEO operations through Treg, with
 Preserve existing DataForSEO functionality while introducing a provider-neutral boundary. Enable Treg only for operations whose endpoint, authentication, response schema, and data meaning have been verified.
 
 Required outcomes:
+
 - Administrators can configure credentials, test a candidate configuration, review supported features, and activate it.
 - Feature services consume normalized results rather than vendor response objects.
 - Unsupported operations produce an explicit unavailable state, never fabricated zero metrics.
@@ -25,6 +28,7 @@ Initial scope excludes automatic cross-provider failover, custom arbitrary API U
 Inspect the actual target checkout, record its commit SHA, and read its contributor instructions. The paths and commands in the original plan are starting points, not verified repository facts.
 
 Inspect:
+
 - Existing DataForSEO client, credentials, response parsing, error handling, and billing behavior.
 - All provider call sites: feature services, scheduled jobs, workers, server functions, exports, and tests.
 - Existing database abstraction, schema exports, migrations, settings model, tenancy, and authorization.
@@ -32,6 +36,7 @@ Inspect:
 - Route conventions, package scripts, runtime environment access, Docker build and entrypoint.
 
 Suggested searches, adjusted to the checkout:
+
 ```bash
 rg --files -g AGENTS.md -g package.json -g '*drizzle*' -g '*schema*' -g '*compose*' -g '*Dockerfile*'
 rg -n 'dataforseo|DATAFORSEO|task_post|task_get' src drizzle
@@ -40,13 +45,13 @@ rg -n 'admin|role|tenant|workspace|settings' src
 
 Deliver an operation inventory before choosing the final interface:
 
-| Operation family | What to inspect | Treg release gate |
-| --- | --- | --- |
-| Live SERP / rank tracking | Engine, device, market, result depth, organic ranking semantics | Documented route and representative fixture |
-| Keyword research | Metrics, suggestions, related terms, trends, batch limits | Each consumed operation mapped separately |
-| Domain overview | Traffic estimates, keyword counts, date ranges | Equivalent definitions or explicit differences |
-| Backlinks | Summary, list, pagination, referring domains | Verified coverage and pagination |
-| Site audits | Crawl submission, polling, result retrieval | Complete task lifecycle or unavailable state |
+| Operation family          | What to inspect                                                 | Treg release gate                              |
+| ------------------------- | --------------------------------------------------------------- | ---------------------------------------------- |
+| Live SERP / rank tracking | Engine, device, market, result depth, organic ranking semantics | Documented route and representative fixture    |
+| Keyword research          | Metrics, suggestions, related terms, trends, batch limits       | Each consumed operation mapped separately      |
+| Domain overview           | Traffic estimates, keyword counts, date ranges                  | Equivalent definitions or explicit differences |
+| Backlinks                 | Summary, list, pagination, referring domains                    | Verified coverage and pagination               |
+| Site audits               | Crawl submission, polling, result retrieval                     | Complete task lifecycle or unavailable state   |
 
 Do not assume four generic methods cover every existing feature. A keyword metrics endpoint does not replace keyword discovery. SERP retrieval does not replace a crawl audit.
 
@@ -64,15 +69,15 @@ Request flow: authenticated feature service → provider resolver → capability
 
 Proposed modules, subject to repository conventions:
 
-| Module | Responsibility |
-| --- | --- |
-| `src/server/providers/types.ts` | Operation contracts, normalized results, typed errors |
-| `src/server/providers/registry.ts` | Explicit provider IDs and adapter construction |
-| `src/server/providers/resolver.ts` | Effective settings, credential source, immutable execution context |
-| `src/server/providers/dataforseo/` | Wrap the existing client and normalize responses |
-| `src/server/providers/treg/` | Verified Treg transport and operation mappings |
-| `src/server/features/settings/provider-settings.ts` | Authorized configuration, testing, activation, audit |
-| Existing settings route | Admin UI integrated into current navigation |
+| Module                                              | Responsibility                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------ |
+| `src/server/providers/types.ts`                     | Operation contracts, normalized results, typed errors              |
+| `src/server/providers/registry.ts`                  | Explicit provider IDs and adapter construction                     |
+| `src/server/providers/resolver.ts`                  | Effective settings, credential source, immutable execution context |
+| `src/server/providers/dataforseo/`                  | Wrap the existing client and normalize responses                   |
+| `src/server/providers/treg/`                        | Verified Treg transport and operation mappings                     |
+| `src/server/features/settings/provider-settings.ts` | Authorized configuration, testing, activation, audit               |
+| Existing settings route                             | Admin UI integrated into current navigation                        |
 
 Keep provider modules server-only. The registry must reject unknown provider IDs rather than defaulting silently. Reuse existing transport, database, validation, and authorization utilities where possible.
 
@@ -81,12 +86,18 @@ Keep provider modules server-only. The registry must reject unknown provider IDs
 Use operation-level capabilities and a discriminated result type. The following is a design sketch, not a replacement for the inventory-derived contract:
 
 ```typescript
-type ProviderId = 'dataforseo' | 'treg';
-type CapabilityState = 'available' | 'unsupported' | 'unverified';
+type ProviderId = "dataforseo" | "treg";
+type CapabilityState = "available" | "unsupported" | "unverified";
 type ProviderErrorCode =
-  | 'UNSUPPORTED' | 'NOT_CONFIGURED' | 'INVALID_REQUEST'
-  | 'AUTH_FAILED' | 'RATE_LIMITED' | 'QUOTA_EXCEEDED'
-  | 'TIMEOUT' | 'UPSTREAM_ERROR' | 'INVALID_RESPONSE';
+  | "UNSUPPORTED"
+  | "NOT_CONFIGURED"
+  | "INVALID_REQUEST"
+  | "AUTH_FAILED"
+  | "RATE_LIMITED"
+  | "QUOTA_EXCEEDED"
+  | "TIMEOUT"
+  | "UPSTREAM_ERROR"
+  | "INVALID_RESPONSE";
 
 interface ResultMeta {
   provider: ProviderId;
@@ -100,15 +111,20 @@ interface ResultMeta {
 
 type ProviderResult<T> =
   | { ok: true; data: T; meta: ResultMeta }
-  | { ok: false; error: {
-      code: ProviderErrorCode;
-      message: string;
-      retryable: boolean;
-      retryAfterMs?: number;
-    }; meta: ResultMeta };
+  | {
+      ok: false;
+      error: {
+        code: ProviderErrorCode;
+        message: string;
+        retryable: boolean;
+        retryAfterMs?: number;
+      };
+      meta: ResultMeta;
+    };
 ```
 
 Contract rules:
+
 - Carry explicit market/location, language, search engine, device, depth, and date scope where relevant. Validate supported combinations; do not silently substitute locations.
 - Use `null` for unknown metrics and `0` only for a measured zero. Never coerce absent volume, traffic, or backlink counts to zero.
 - Define CPC currency, competition scale, traffic units, estimation period, and metric source. Keep unrelated vendor authority scores separately named; do not imply they are interchangeable.
@@ -126,15 +142,16 @@ First decide scope from the existing tenancy model. Use a singleton only for an 
 
 Proposed logical records:
 
-| Record | Fields / purpose |
-| --- | --- |
-| Provider settings | Scope key, active provider (nullable), monotonic revision, updated time, updated by |
+| Record               | Fields / purpose                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| Provider settings    | Scope key, active provider (nullable), monotonic revision, updated time, updated by       |
 | Provider credentials | Scope, provider, encrypted credential bundle, key version, credential version, timestamps |
-| Provider audit event | Actor, scope, old/new provider, revision, action, outcome, timestamp; no secret values |
+| Provider audit event | Actor, scope, old/new provider, revision, action, outcome, timestamp; no secret values    |
 
 Adapt tables to existing conventions instead of duplicating a suitable settings system. Generate migrations for every supported runtime in scope. PostgreSQL and SQLite/D1 need dialect-appropriate constraints and timestamp handling.
 
 Effective configuration:
+
 1. An explicitly saved database selection wins.
 2. Otherwise use a validated `SEO_PROVIDER` environment value.
 3. Otherwise preserve the existing DataForSEO default.
@@ -145,6 +162,7 @@ Do not seed a Treg default during migration or store a default that unintentiona
 DataForSEO's direct REST API uses HTTP Basic authentication with API login and API password. Model these as one credential bundle. Do not label an arbitrary value `DATAFORSEO_API_KEY` and send it as Bearer. If the existing application uses a pre-encoded Basic value, retain compatibility through an explicit, validated mapping.
 
 Credential input semantics:
+
 - Omitted / unchanged: preserve the existing override.
 - Replace: validate and encrypt the entire submitted bundle.
 - Use environment: explicitly delete the database override and resolve the server environment bundle.
@@ -155,12 +173,15 @@ Use a managed secrets store or authenticated encryption with an externally suppl
 ## 6. Provider adapters and transport
 
 ### DataForSEO
+
 Wrap existing, working request code first. Preserve current behavior and map errors at the boundary. Avoid rewriting all services and transport simultaneously. Build fixtures for each operation used by the application before routing production features through the adapter.
 
 ### Treg
+
 Implement only verified operation mappings. Validate responses with runtime schemas. Capabilities start as unverified, become available after contract and smoke validation, or become unsupported when confirmed absent. A failed connection is an operational failure, not proof that an operation is unsupported.
 
 ### Shared transport requirements
+
 - Use explicit connect/request deadlines, cancellation, bounded concurrency, and payload/batch limits.
 - Retry only when safe, with a bounded backoff and jitter; respect upstream retry guidance.
 - Do not automatically retry potentially billable submissions after an ambiguous timeout. Use documented idempotency or task reconciliation where supported.
@@ -174,6 +195,7 @@ Implement only verified operation mappings. Validate responses with runtime sche
 For the initial implementation, read the committed settings revision from the shared database at the start of each new request/job. Cache adapter configuration only by scope, provider, revision, and credential version. This favors predictable switching over a premature 30-second settings cache.
 
 Activation flow:
+
 1. Authorize the administrator and validate the candidate configuration.
 2. Test the candidate outside the database transaction, binding the result to its credential version and capability configuration.
 3. Require successful readiness checks for a declared set of must-have operations. Show optional feature loss explicitly before activation.
@@ -193,16 +215,17 @@ Result-cache keys must include scope, provider/upstream identity, operation, nor
 
 Implement authorization on every server function, including tests and reads. Reuse established CSRF/origin protections and schema validation. Rate-limit connection tests and settings writes.
 
-| Action | Behavior |
-| --- | --- |
-| Read settings | Return effective provider, source, revision, secret-presence flags, capability matrix, readiness status |
-| Save candidate | Store inactive configuration securely; do not activate implicitly |
-| Test candidate | Validate exact candidate and return sanitized, timestamped readiness results |
-| Activate | Require expected revision and a valid test of the exact candidate; commit atomically |
-| Use environment | Explicit action with preview of effective provider/credential availability |
-| Roll back | Activate a retained, valid configuration as a new audited revision |
+| Action          | Behavior                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| Read settings   | Return effective provider, source, revision, secret-presence flags, capability matrix, readiness status |
+| Save candidate  | Store inactive configuration securely; do not activate implicitly                                       |
+| Test candidate  | Validate exact candidate and return sanitized, timestamped readiness results                            |
+| Activate        | Require expected revision and a valid test of the exact candidate; commit atomically                    |
+| Use environment | Explicit action with preview of effective provider/credential availability                              |
+| Roll back       | Activate a retained, valid configuration as a new audited revision                                      |
 
 The UI should include:
+
 - Separate current active provider and editable candidate state.
 - Provider-specific credential inputs: DataForSEO login/password; Treg fields matching verified documentation.
 - Explicit replace/use-environment actions; never echo saved secrets into inputs.
@@ -216,40 +239,40 @@ Unsupported feature pages show “Not supported by the active provider.” Authe
 
 ## 9. Delivery sequence and acceptance gates
 
-| Phase | Work | Exit gate |
-| --- | --- | --- |
-| 0 — Discovery | Inspect checkout, map operations, verify vendor contracts | Evidence matrix and unresolved dependencies documented |
-| 1 — Contract | Types, capability model, typed errors, fixtures | Existing feature semantics covered |
-| 2 — DataForSEO adapter | Wrap current client and migrate one feature at a time | Baseline behavior retained |
-| 3 — Settings | Schema, encryption, resolver, authorization, revisions | Secure configuration and atomic updates tested |
-| 4 — Treg adapter | Verified operations and schema normalization | Fixtures pass; supported operations smoke-tested |
-| 5 — Admin UI | Candidate/test/activation flow and feature availability | End-to-end switching works |
-| 6 — Remaining consumers | Jobs, audits, exports, cache provenance | No unintended direct vendor dependencies remain |
-| 7 — Deployment | Migration gate, health checks, rollback rehearsal | Release criteria below pass |
+| Phase                   | Work                                                      | Exit gate                                              |
+| ----------------------- | --------------------------------------------------------- | ------------------------------------------------------ |
+| 0 — Discovery           | Inspect checkout, map operations, verify vendor contracts | Evidence matrix and unresolved dependencies documented |
+| 1 — Contract            | Types, capability model, typed errors, fixtures           | Existing feature semantics covered                     |
+| 2 — DataForSEO adapter  | Wrap current client and migrate one feature at a time     | Baseline behavior retained                             |
+| 3 — Settings            | Schema, encryption, resolver, authorization, revisions    | Secure configuration and atomic updates tested         |
+| 4 — Treg adapter        | Verified operations and schema normalization              | Fixtures pass; supported operations smoke-tested       |
+| 5 — Admin UI            | Candidate/test/activation flow and feature availability   | End-to-end switching works                             |
+| 6 — Remaining consumers | Jobs, audits, exports, cache provenance                   | No unintended direct vendor dependencies remain        |
+| 7 — Deployment          | Migration gate, health checks, rollback rehearsal         | Release criteria below pass                            |
 
 Keep each phase reviewable. Run the repository's actual lint, typecheck, build, and test scripts; do not assume `pnpm db:migrate:pg`, `pnpm tsc --noEmit`, or `node server.js` are valid entrypoints.
 
 ## 10. Verification matrix
 
-| Scenario | Expected result |
-| --- | --- |
-| Upgrade without new settings | Existing DataForSEO configuration continues working |
-| Invalid provider ID or absent credentials | Explicit configuration error; no silent fallback |
-| Database override / environment / default | Documented precedence, including explicit override removal |
-| Non-admin request or cross-workspace access | Denied server-side; no secret or settings leakage |
-| Secret replacement and encryption rotation | Stored encrypted; old jobs handled by defined lifecycle |
-| HTTP 200 with vendor task failure | Typed failure, not success |
-| Missing metric versus measured zero | Distinct normalized values and display |
-| Unsupported backlinks or audits | Explicit unavailable state; no fabricated empty result |
-| Keyword batch partly fails | Successful items preserved; failures identified |
-| Pagination and rank semantics | Stable, correct ordering and complete requested scope |
-| Authentication / quota / timeout failures | Correct UI state and bounded, safe retry policy |
-| Two admins save concurrently | One update succeeds; stale revision conflicts |
-| Switch with two app instances | New work uses committed revision on both instances |
-| Switch during request or async job | Existing work retains provider and task identity |
-| Provider switch with cached results | No cross-provider or cross-workspace cache leakage |
-| Database unavailable | Explicit failure for new resolution; no unexpected vendor calls |
-| Rollback after activation | Previous usable configuration restored as a new revision |
+| Scenario                                    | Expected result                                                 |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| Upgrade without new settings                | Existing DataForSEO configuration continues working             |
+| Invalid provider ID or absent credentials   | Explicit configuration error; no silent fallback                |
+| Database override / environment / default   | Documented precedence, including explicit override removal      |
+| Non-admin request or cross-workspace access | Denied server-side; no secret or settings leakage               |
+| Secret replacement and encryption rotation  | Stored encrypted; old jobs handled by defined lifecycle         |
+| HTTP 200 with vendor task failure           | Typed failure, not success                                      |
+| Missing metric versus measured zero         | Distinct normalized values and display                          |
+| Unsupported backlinks or audits             | Explicit unavailable state; no fabricated empty result          |
+| Keyword batch partly fails                  | Successful items preserved; failures identified                 |
+| Pagination and rank semantics               | Stable, correct ordering and complete requested scope           |
+| Authentication / quota / timeout failures   | Correct UI state and bounded, safe retry policy                 |
+| Two admins save concurrently                | One update succeeds; stale revision conflicts                   |
+| Switch with two app instances               | New work uses committed revision on both instances              |
+| Switch during request or async job          | Existing work retains provider and task identity                |
+| Provider switch with cached results         | No cross-provider or cross-workspace cache leakage              |
+| Database unavailable                        | Explicit failure for new resolution; no unexpected vendor calls |
+| Rollback after activation                   | Previous usable configuration restored as a new revision        |
 
 Use sanitized fixtures for normal tests. Keep live vendor tests opt-in, low-volume, and within an agreed spend limit. A lack of live credentials must be reported as an unverified integration, not a passing test.
 
@@ -267,16 +290,16 @@ Use sanitized fixtures for normal tests. Keep live vendor tests opt-in, low-volu
 
 ## 12. Definition of done and handoff
 
-- [ ] Target checkout SHA, real paths, scripts, tenancy model, and deployment modes documented.
-- [ ] All consumed operations covered by an adapter or an explicit unavailable state.
-- [ ] Treg endpoint/authentication evidence recorded; no invented routes or assumed parity.
-- [ ] Existing DataForSEO functionality passes regression checks.
-- [ ] Credentials encrypted at rest, redacted in logs, absent from client bundles and responses.
-- [ ] Settings precedence, concurrency, multi-instance switching, and job continuity verified.
+- [x] Target checkout SHA, real paths, scripts, tenancy model, and deployment modes documented.
+- [x] All consumed operations covered by an adapter or an explicit unavailable state.
+- [x] Treg endpoint/authentication evidence recorded; no invented routes or assumed parity.
+- [x] Existing DataForSEO functionality passes regression checks.
+- [x] Credentials encrypted at rest, redacted in logs, absent from client bundles and responses.
+- [x] Settings precedence, concurrency, local multi-process switching, and job continuity verified on SQLite/Postgres. Deployed-instance validation remains a release gate.
 - [ ] UI distinguishes unsupported, empty, partial, and failed results.
-- [ ] Required checks and production build pass using repository scripts.
+- [x] Required checks and production build pass using repository scripts. Final Linux CI passed; all 1,700 tests passed with four workers. Windows checkout limitations are documented in the handoff.
 - [ ] Migration, restore, credential rotation, and provider rollback documented and exercised.
-- [ ] Handoff lists changed files, migrations, environment variables, test results, supported operations, and remaining limitations.
+- [x] Handoff lists changed files, migrations, environment variables, test results, supported operations, and remaining limitations.
 
 ## 13. Reference notes
 

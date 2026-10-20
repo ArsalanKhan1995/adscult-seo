@@ -18,6 +18,11 @@ const ERROR_CODES = [
   "AI_SEARCH_BILLING_ISSUE",
   "AI_VISIBILITY_ERROR",
   "DATAFORSEO_AUTH_FAILED",
+  "SEO_PROVIDER_NOT_CONFIGURED",
+  "SEO_PROVIDER_UNSUPPORTED",
+  "SEO_PROVIDER_CONFIGURATION_UNAVAILABLE",
+  "SEO_PROVIDER_QUOTA_EXCEEDED",
+  "SEO_PROVIDER_TIMEOUT",
   "RATE_LIMITED",
   "UPSTREAM_UNAVAILABLE",
   "CONFLICT",
@@ -29,6 +34,10 @@ export const errorCodeSchema = z.enum(ERROR_CODES);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 
 const NON_REPORTABLE_ERROR_CODES = new Set<ErrorCode>([
+  "SEO_PROVIDER_QUOTA_EXCEEDED",
+  "SEO_PROVIDER_TIMEOUT",
+  "SEO_PROVIDER_NOT_CONFIGURED",
+  "SEO_PROVIDER_UNSUPPORTED",
   "UNAUTHENTICATED",
   // External throttling (Google Analytics quota, Autumn, DataForSEO): expected
   // and transient, and nothing in the app can act on it.

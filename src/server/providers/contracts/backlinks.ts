@@ -103,3 +103,20 @@ export type ReferringDomainsPageResult = z.infer<
   typeof referringDomainsPageResultSchema
 >;
 export type TopPagesPageResult = z.infer<typeof topPagesPageResultSchema>;
+
+import type {
+  BacklinksRowsPageInput,
+  ReferringDomainsPageInput,
+  TopPagesPageInput,
+} from "@/types/schemas/backlinks";
+// The page-request schemas carry projectId for the web middleware; the
+// service layer is organization-scoped and never reads it.
+export type BacklinksRowsPageServiceInput = Omit<
+  BacklinksRowsPageInput,
+  "projectId"
+>;
+export type ReferringDomainsPageServiceInput = Omit<
+  ReferringDomainsPageInput,
+  "projectId"
+>;
+export type TopPagesPageServiceInput = Omit<TopPagesPageInput, "projectId">;

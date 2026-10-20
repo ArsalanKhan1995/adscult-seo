@@ -19,7 +19,10 @@ export async function exportAiData(input: AiExportInput, baseUrl: string) {
       "EXPORT_SCOPE",
       "Choose one run to export. Prompt history can be inspected separately.",
     );
-  const { result, answers } = await loadAiFullAnswers(input);
+  const { result, answers, provenance } = await loadAiFullAnswers(input);
+  const sourceByObservation = new Map(
+    provenance.map((source) => [source.observationId, source]),
+  );
   if (!result.runId)
     throw new AiVisibilityError(
       "NO_RESULTS",
@@ -34,6 +37,7 @@ export async function exportAiData(input: AiExportInput, baseUrl: string) {
             run: result.run,
             coverage: result.coverage,
             answers,
+            provenance,
           },
           null,
           2,
@@ -49,6 +53,9 @@ export async function exportAiData(input: AiExportInput, baseUrl: string) {
             "brand_mentions",
             "citation_urls",
             "answer",
+            "provider",
+            "upstream_vendor",
+            "provider_revision",
           ]
             .map(csvCell)
             .join(","),
@@ -66,6 +73,9 @@ export async function exportAiData(input: AiExportInput, baseUrl: string) {
                 .join("; "),
               a.sources.map((s) => s.url).join("; "),
               a.answerText,
+              sourceByObservation.get(a.observation.id)?.provider,
+              sourceByObservation.get(a.observation.id)?.upstreamVendor,
+              sourceByObservation.get(a.observation.id)?.revision,
             ]
               .map(csvCell)
               .join(","),

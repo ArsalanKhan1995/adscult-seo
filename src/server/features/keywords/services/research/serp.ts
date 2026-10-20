@@ -1,13 +1,17 @@
 import { waitUntil } from "cloudflare:workers";
 import {
   SERP_ANALYSIS_DEPTH,
-  type SerpLiveItem,
-} from "@/server/lib/dataforseo";
+  serpScopeSchema,
+  serpProvenanceSchema,
+  type SerpRow,
+} from "@/server/providers/contracts/serp";
+import { fetchSerp } from "@/server/providers/serp";
+import { AppError } from "@/server/lib/errors";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import type { SerpResultItem } from "@/types/keywords";
 import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { normalizeKeyword } from "./helpers";
 import { assertLocalResearchLocation } from "./local-volume";
 
@@ -21,6 +25,8 @@ type SerpAnalysisResult = {
   /** SERP depth this snapshot was crawled at — how deep the results go. */
   depth: number;
   reason?: SerpAnalysisReason;
+  scope?: z.infer<typeof serpScopeSchema>;
+  provenance?: z.infer<typeof serpProvenanceSchema>;
 };
 
 const serpResultItemSchema = z.object({
@@ -45,21 +51,28 @@ const serpCacheSchema = z.object({
   // crawl once, rather than being shown 20 results as if they were 100.
   depth: z.number().int().default(SERP_ANALYSIS_DEPTH),
   reason: z.enum(["no_organic_results"]).optional(),
+  scope: serpScopeSchema.optional(),
+  provenance: serpProvenanceSchema.optional(),
 });
 
-function mapOrganicSerpItems(items: SerpLiveItem[]): SerpResultItem[] {
+function mapOrganicSerpItems(items: SerpRow[]): SerpResultItem[] {
   return items
-    .filter((item) => item.type === "organic")
+    .filter(
+      (item) =>
+        item.resultType === "organic" &&
+        (item.organicPosition ?? item.absolutePosition) !== null,
+    )
     .map((item) => ({
-      rank: item.rank_group ?? item.rank_absolute ?? 0,
+      // The presentation contract requires a known rank; unranked rows are omitted.
+      rank: (item.organicPosition ?? item.absolutePosition)!,
       title: item.title ?? "",
       url: item.url ?? "",
       domain: item.domain ?? "",
       description: item.description ?? "",
-      etv: item.etv ?? null,
-      estimatedPaidTrafficCost: item.estimated_paid_traffic_cost ?? null,
-      referringDomains: item.backlinks_info?.referring_domains ?? null,
-      backlinks: item.backlinks_info?.backlinks ?? null,
+      etv: item.estimatedMonthlyVisits,
+      estimatedPaidTrafficCost: item.estimatedPaidTrafficCost,
+      referringDomains: item.referringDomains,
+      backlinks: item.backlinks,
       isNew: false,
       rankChange: null,
     }));
@@ -101,19 +114,29 @@ async function getSerpLiveAnalysis(
     return cached.data;
   }
 
-  const liveItems = await createDataforseoClient(billingCustomer).serp.live({
+  const batch = await fetchSerp(billingCustomer, {
     keyword,
     locationCode: input.locationCode,
     languageCode: input.languageCode,
     locationName: input.locationName,
     depth,
   });
+  const response = unwrapProviderResult(batch);
 
-  const items = mapOrganicSerpItems(liveItems);
+  const items = mapOrganicSerpItems(response.rows);
+  if (
+    items.length === 0 &&
+    response.rows.some((row) => row.resultType === "organic")
+  ) {
+    // Missing positions are an incomplete response, not evidence of an empty SERP.
+    throw new AppError("UPSTREAM_UNAVAILABLE");
+  }
   const result: SerpAnalysisResult = {
     requestedKeyword: keyword,
     items,
     depth,
+    scope: response.scope,
+    provenance: serpProvenanceSchema.parse(batch.meta),
   };
   if (items.length === 0) {
     result.reason = "no_organic_results";

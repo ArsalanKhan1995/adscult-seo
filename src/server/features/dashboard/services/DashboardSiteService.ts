@@ -3,14 +3,14 @@ import { z } from "zod";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { DashboardCacheService } from "./DashboardCacheService";
 import {
-  createDataforseoClient,
-  normalizeBacklinksTarget,
-} from "@/server/lib/dataforseo";
-import { mapBacklinksRows } from "@/server/features/backlinks/services/backlinksRowMappers";
+  fetchBacklinkActivity,
+  fetchReferringDomainActivity,
+} from "@/server/providers/backlinks";
+import { unwrapProviderResult } from "@/server/providers/operation";
 import {
-  referringDomainItemSchema,
-  backlinksItemSchema,
-} from "@/server/lib/dataforseo/backlinks";
+  backlinksRowsPageResultSchema,
+  referringDomainsPageResultSchema,
+} from "@/server/providers/contracts/backlinks";
 import {
   GscService,
   isExpectedGrantFailure,
@@ -39,43 +39,19 @@ async function getBacklinks(
   billingCustomer: BillingCustomerContext,
 ) {
   const result = await DashboardCacheService.readThrough({
-    namespace: "dashboard:links",
+    namespace: "dashboard:links:v2",
+    seoProvider: true,
     organizationId: billingCustomer.organizationId,
     params: input,
-    schema: z.array(backlinksItemSchema),
+    schema: backlinksRowsPageResultSchema.shape.rows,
     maxAgeMs: 86400_000,
     load: async () => {
-      const target = normalizeBacklinksTarget(input.domain, {
-        scope: "subdomains",
-      });
-      const from = new Date(Date.now() - 7 * 86400_000)
-        .toISOString()
-        .slice(0, 10);
-      const response = await createDataforseoClient(
-        billingCustomer,
-      ).backlinks.rows({
-        target: target.apiTarget,
-        includeSubdomains: true,
-        limit: 25,
-        mode: "one_per_domain",
-        status: input.kind === "lost" ? "lost" : "live",
-        hideSpam: false,
-        orderBy: [input.kind === "lost" ? "last_seen,desc" : "first_seen,desc"],
-        filters:
-          input.kind === "all"
-            ? undefined
-            : [
-                [
-                  input.kind === "lost" ? "last_seen" : "first_seen",
-                  ">=",
-                  `${from} 00:00:00 +00:00`,
-                ],
-              ],
-      });
-      return response.items;
+      return unwrapProviderResult(
+        await fetchBacklinkActivity(billingCustomer, input),
+      ).rows;
     },
   });
-  return { ...result, value: mapBacklinksRows(result.value) };
+  return result;
 }
 
 async function getKeywords(projectId: string, organizationId: string) {
@@ -282,30 +258,17 @@ async function getLinkActivity(
   domain: string,
   billingCustomer: BillingCustomerContext,
 ) {
-  const target = normalizeBacklinksTarget(domain, {
-    scope: "subdomains",
-  }).apiTarget;
   const domains = await DashboardCacheService.readThrough({
-    namespace: "dashboard:new-domains",
+    namespace: "dashboard:new-domains:v2",
+    seoProvider: true,
     organizationId: billingCustomer.organizationId,
-    params: { target },
-    schema: z.array(referringDomainItemSchema),
+    params: { domain },
+    schema: referringDomainsPageResultSchema.shape.rows,
     maxAgeMs: 86400_000,
     load: async () => {
-      const from = new Date(Date.now() - 7 * 86400_000)
-        .toISOString()
-        .slice(0, 10);
-      const response = await createDataforseoClient(
-        billingCustomer,
-      ).backlinks.referringDomains({
-        target,
-        includeSubdomains: true,
-        limit: 25,
-        hideSpam: false,
-        orderBy: ["first_seen,desc"],
-        filters: [["first_seen", ">=", `${from} 00:00:00 +00:00`]],
-      });
-      return response.items;
+      return unwrapProviderResult(
+        await fetchReferringDomainActivity(billingCustomer, domain),
+      ).rows;
     },
   });
   // Stale domain results must not trigger a second charge or pretend the week is quiet.
@@ -315,7 +278,7 @@ async function getLinkActivity(
       value: domains.value.map((row) => ({
         domain: row.domain ?? null,
         backlinks: row.backlinks ?? null,
-        firstSeen: row.first_seen ?? null,
+        firstSeen: row.firstSeen ?? null,
       })),
       kind: "domains" as const,
       links: [],

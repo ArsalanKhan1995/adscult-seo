@@ -1,0 +1,1 @@
+ALTER TABLE `rank_tracking_keywords` ADD `provider_result_source_id` text REFERENCES seo_provider_result_sources(id);

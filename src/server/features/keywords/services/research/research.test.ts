@@ -1,10 +1,19 @@
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderExecution: async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+    source: "environment",
+    authorization: "test-only",
+  }),
+}));
 import { expect, it, vi } from "vitest";
 import type { KeywordResearchRow } from "@/types/keywords";
 import { EMPTY_FILTERS } from "@/client/features/keywords/keywordResearchTypes";
 import { applyKeywordFiltersAndSort } from "@/client/features/keywords/hooks/useKeywordFiltering";
 import { buildCacheKey } from "@/server/lib/r2-cache";
 import { research } from "./research";
-import type * as ResearchData from "./research-data";
 
 const mocks = vi.hoisted(() => ({
   cache: new Map<string, string>(),
@@ -34,9 +43,7 @@ vi.mock("cloudflare:workers", () => ({
     },
   },
 }));
-vi.mock("./research-data", async (importOriginal) => ({
-  mapAdsKeywordItems: (await importOriginal<typeof ResearchData>())
-    .mapAdsKeywordItems,
+vi.mock("./research-data", () => ({
   fetchResearchRowsBySource: mocks.fetchRows,
   fetchGoogleAdsResearchRows: vi.fn(),
 }));

@@ -8,15 +8,20 @@ import { AppError, asAppError } from "@/server/lib/errors";
 async function readThrough<T>(input: {
   namespace: string;
   organizationId: string;
+  seoProvider?: boolean;
   params: Record<string, unknown>;
   schema: z.ZodType<T>;
   maxAgeMs: number;
   load: () => Promise<T>;
 }) {
-  const key = await buildCacheKey(input.namespace, {
-    ...input.params,
-    organizationId: input.organizationId,
-  });
+  const key = await buildCacheKey(
+    input.namespace,
+    {
+      ...input.params,
+      organizationId: input.organizationId,
+    },
+    { seoProvider: input.seoProvider ?? false },
+  );
   const schema = z.object({ value: input.schema, fetchedAt: z.string() });
   const parsed = schema.safeParse(await getCached(key));
   const cached = parsed.success ? parsed.data : null;

@@ -356,6 +356,7 @@ async function updateKeywordMetrics(
     keywordDifficulty: number | null;
     cpc: number | null;
     metricsFetchedAt: string;
+    providerResultSourceId?: string | null;
   }>,
 ) {
   await executeInBatches(updates, (tx, u) =>
@@ -366,6 +367,7 @@ async function updateKeywordMetrics(
         keywordDifficulty: u.keywordDifficulty,
         cpc: u.cpc,
         metricsFetchedAt: u.metricsFetchedAt,
+        providerResultSourceId: u.providerResultSourceId ?? null,
       })
       .where(eq(rankTrackingKeywords.id, u.id)),
   );

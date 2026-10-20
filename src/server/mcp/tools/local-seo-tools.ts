@@ -1,14 +1,21 @@
 /* eslint-disable max-lines */
 import { z } from "zod";
+import type {
+  BusinessTaskEndpoint,
+  BusinessTaskOutcome,
+  LocalSerpTaskOutcome,
+} from "@/server/providers/contracts/local-business";
 import {
-  createDataforseoClient,
-  fetchBusinessDataTaskResult,
-  fetchBusinessListingsCategories,
-  fetchLocalSerpTaskResult,
-  type BusinessTaskEndpoint,
-  type BusinessTaskOutcome,
-  type LocalSerpTaskOutcome,
-} from "@/server/lib/dataforseo";
+  fetchBusinessProfile,
+  postBusinessReviews,
+  postBusinessUpdates,
+  collectBusinessTask,
+  fetchBusinessCategories,
+  postMapsTasks,
+  collectMapsTask,
+} from "@/server/providers/local-business";
+import { unwrapProviderResult } from "@/server/providers/operation";
+import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { AppError } from "@/server/lib/errors";
 import { buildCacheKey, getCached, setCached } from "@/server/lib/r2-cache";
 import { buildProjectMeta } from "@/server/mcp/context";
@@ -89,11 +96,14 @@ function wait(ms: number) {
 async function pollBusinessTask(
   input: { endpoint: BusinessTaskEndpoint; taskId: string },
   publicTaskId: string,
+  customer: BillingCustomerContext,
 ): Promise<BusinessTaskOutcome> {
   try {
     for (let attempt = 0; attempt < TASK_POLL_ATTEMPTS; attempt++) {
       if (attempt > 0) await wait(TASK_POLL_INTERVAL_MS);
-      const outcome = await fetchBusinessDataTaskResult(input);
+      const outcome = unwrapProviderResult(
+        await collectBusinessTask(customer, input),
+      );
       if (outcome.status === "completed") return outcome;
     }
     return { status: "pending", result: null };
@@ -175,7 +185,7 @@ function formatRatingDistribution(profile: Record<string, unknown>): string {
   if (distribution == null) return "—";
   const stars = [5, 4, 3, 2, 1].map((star) => {
     const count = readPath(distribution, String(star));
-    return `${star}★ ${typeof count === "number" ? count : 0}`;
+    return `${star}★ ${formatMcpCell(typeof count === "number" ? count : null)}`;
   });
   return stars.join(", ");
 }
@@ -235,11 +245,12 @@ export const getBusinessProfileTool = {
   },
   handler: withMcpProjectAuth(async (args: GetBusinessProfileArgs, context) => {
     const identifier = resolveBusinessIdentifier(args);
-    const client = createDataforseoClient(context.billing);
-    const profile = await client.business.myBusinessInfo({
-      keyword: businessIdentifierKeyword(identifier),
-      ...resolveBusinessLocation(args, context.project),
-    });
+    const { profile } = unwrapProviderResult(
+      await fetchBusinessProfile(context.billing, {
+        keyword: businessIdentifierKeyword(identifier),
+        ...resolveBusinessLocation(args, context.project),
+      }),
+    );
 
     return mcpResponse({
       text: profile
@@ -395,16 +406,17 @@ export const getBusinessReviewsTool = {
       publicTaskId = args.taskId;
     } else {
       const identifier = resolveBusinessIdentifier(args);
-      const client = createDataforseoClient(context.billing);
       // Only the post is metered; the polling below collects for free.
-      const postedId = await client.business.reviewsTaskPost({
-        ...identifier,
-        ...resolveBusinessLocation(args, context.project),
-        depth: args.depth ?? 20,
-        // The fetcher's extended branch has no sort_by and ignores this.
-        sortBy: args.sortBy ?? "newest",
-        includeOtherSources,
-      });
+      const { taskId: postedId } = unwrapProviderResult(
+        await postBusinessReviews(context.billing, {
+          ...identifier,
+          ...resolveBusinessLocation(args, context.project),
+          depth: args.depth ?? 20,
+          // The fetcher's extended branch has no sort_by and ignores this.
+          sortBy: args.sortBy ?? "newest",
+          includeOtherSources,
+        }),
+      );
       task = {
         endpoint: includeOtherSources ? "extended_reviews" : "reviews",
         taskId: postedId,
@@ -412,7 +424,7 @@ export const getBusinessReviewsTool = {
       publicTaskId = encodeReviewsTaskId(includeOtherSources, postedId);
     }
 
-    const outcome = await pollBusinessTask(task, publicTaskId);
+    const outcome = await pollBusinessTask(task, publicTaskId, context.billing);
     if (outcome.status === "pending") {
       return mcpResponse({
         text: `Review collection is still running. Call get_business_reviews again with taskId "${publicTaskId}" in 30-60 seconds — resuming charges no extra credits.`,
@@ -552,17 +564,19 @@ export const getBusinessUpdatesTool = {
       taskId = args.taskId;
     } else {
       const identifier = resolveBusinessIdentifier(args);
-      const client = createDataforseoClient(context.billing);
-      taskId = await client.business.updatesTaskPost({
-        keyword: businessIdentifierKeyword(identifier),
-        ...resolveBusinessLocation(args, context.project),
-        depth: args.depth ?? 10,
-      });
+      taskId = unwrapProviderResult(
+        await postBusinessUpdates(context.billing, {
+          keyword: businessIdentifierKeyword(identifier),
+          ...resolveBusinessLocation(args, context.project),
+          depth: args.depth ?? 10,
+        }),
+      ).taskId;
     }
 
     const outcome = await pollBusinessTask(
       { endpoint: "my_business_updates", taskId },
       taskId,
+      context.billing,
     );
     if (outcome.status === "pending") {
       return mcpResponse({
@@ -665,7 +679,9 @@ export const listBusinessCategoriesTool = {
       let all = cached.success ? cached.data : null;
       if (!all) {
         // Free at DataForSEO, so this skips the metered client — see index.ts.
-        all = (await fetchBusinessListingsCategories()).data;
+        all = unwrapProviderResult(
+          await fetchBusinessCategories(context.billing),
+        ).rows;
         await setCached(cacheKey, all, BUSINESS_CATEGORIES_TTL_SECONDS);
       }
 
@@ -883,6 +899,7 @@ function matchGridItem(
 async function collectRankGridTask(
   taskId: string | null,
   deadline: number,
+  customer: BillingCustomerContext,
 ): Promise<LocalSerpTaskOutcome> {
   // A point DataForSEO refused at post time has no task to collect.
   if (!taskId) {
@@ -892,7 +909,9 @@ async function collectRankGridTask(
     };
   }
   for (;;) {
-    const outcome = await fetchLocalSerpTaskResult(taskId);
+    const outcome = unwrapProviderResult(
+      await collectMapsTask(customer, taskId),
+    );
     if (outcome.status === "failed") {
       console.warn(
         `[local-rank-grid] task ${taskId} failed: ${outcome.message}`,
@@ -1048,17 +1067,17 @@ export const getLocalRankGridTool = {
       taskIds = receipt.data;
     } else {
       // Only the post is metered; collection is free.
-      taskIds = await createDataforseoClient(
-        context.billing,
-      ).serp.localTaskPost({
-        keyword: args.keyword,
-        locationCoordinates: points.map((point) =>
-          formatLocalSerpCoordinate({ ...point, zoom }),
-        ),
-        languageCode,
-        device,
-        depth: RANK_GRID_DEPTH,
-      });
+      taskIds = unwrapProviderResult(
+        await postMapsTasks(context.billing, {
+          keyword: args.keyword,
+          locationCoordinates: points.map((point) =>
+            formatLocalSerpCoordinate({ ...point, zoom }),
+          ),
+          languageCode,
+          device,
+          depth: RANK_GRID_DEPTH,
+        }),
+      ).taskIds;
       // The searches are already paid for, so a failed receipt write must not
       // fail this call; it only means a repeat would buy them again.
       await setCached(receiptKey, taskIds, RANK_GRID_RECEIPT_TTL_SECONDS).catch(
@@ -1069,7 +1088,9 @@ export const getLocalRankGridTool = {
     }
 
     const outcomes = await Promise.all(
-      taskIds.map((taskId) => collectRankGridTask(taskId, deadline)),
+      taskIds.map((taskId) =>
+        collectRankGridTask(taskId, deadline, context.billing),
+      ),
     );
     const ready = outcomes.filter(
       (outcome) => outcome.status !== "pending",

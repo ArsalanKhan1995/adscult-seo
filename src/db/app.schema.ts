@@ -1,3 +1,4 @@
+import { seoProviderResultSources } from "./seo-provider.schema";
 /* eslint-disable max-lines -- application table declarations */
 import {
   sqliteTable,
@@ -170,6 +171,10 @@ export const savedKeywordTagAssignments = sqliteTable(
 export const keywordMetrics = sqliteTable(
   "keyword_metrics",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: integer("id").primaryKey({ autoIncrement: true }),
     projectId: text("project_id")
       .notNull()
@@ -258,6 +263,10 @@ export const rankTrackingConfigs = sqliteTable(
 export const rankTrackingKeywords = sqliteTable(
   "rank_tracking_keywords",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: text("id").primaryKey(),
     configId: text("config_id")
       .notNull()
@@ -332,6 +341,10 @@ export const rankCheckRuns = sqliteTable(
 export const rankSnapshots = sqliteTable(
   "rank_snapshots",
   {
+    providerResultSourceId: text("provider_result_source_id").references(
+      () => seoProviderResultSources.id,
+      { onDelete: "no action" },
+    ),
     id: integer("id").primaryKey({ autoIncrement: true }),
     runId: text("run_id")
       .notNull()

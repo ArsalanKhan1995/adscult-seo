@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ApiKeySettings } from "@/client/features/settings/ApiKeySettings";
+import { SeoProviderSettings } from "@/client/features/settings/SeoProviderSettings";
 import { SectionHeader } from "@/client/components/PageHeader";
 import { ThemePreferenceRadio } from "@/client/components/ThemePreferenceMenuItems";
 import { Switch } from "@/client/components/ui/switch";
@@ -40,6 +41,7 @@ function PersonalSettings() {
 
   return (
     <div className="space-y-10">
+      <SeoProviderSettings />
       <section className="space-y-3">
         <SectionHeader title="Appearance" />
         <div className="flex items-center justify-between gap-6">

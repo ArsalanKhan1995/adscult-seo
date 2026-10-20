@@ -1,5 +1,6 @@
 import type { WorkflowStep, WorkflowStepConfig } from "cloudflare:workers";
 import { withPgClient } from "@/db";
+import { bindProviderScope } from "@/server/providers/context";
 
 /**
  * `step.do` with a request-scoped Postgres client active inside the step body.
@@ -23,7 +24,8 @@ export function pgStep<T extends Rpc.Serializable<T>>(
   config: WorkflowStepConfig | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
+  const scopedWork = bindProviderScope(fn);
   return config
-    ? step.do(name, config, () => withPgClient(fn))
-    : step.do(name, () => withPgClient(fn));
+    ? step.do(name, config, () => withPgClient(scopedWork))
+    : step.do(name, () => withPgClient(scopedWork));
 }

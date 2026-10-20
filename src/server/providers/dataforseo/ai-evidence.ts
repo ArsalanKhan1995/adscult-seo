@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { safeHttpUrl } from "@/shared/safe-url";
 import type { AiEngine } from "@/shared/ai-visibility";
-import type { LlmResponseResult } from "@/server/lib/dataforseoLlmSchemas";
+import type { LlmResponseResult } from "@/server/providers/contracts/ai-research";
 
 const optionalMarkdown = z.string().max(1_000_000).nullish();
 const sourceList = z.array(z.unknown()).max(2_000).nullish();
@@ -27,21 +27,7 @@ const sourceSchema = z.object({
   title: z.string().max(10_000).nullish(),
 });
 
-export interface AiCitation {
-  url: string;
-  domain: string;
-  title: string | null;
-  position: number;
-}
-
-export interface ParsedAiAnswer {
-  /** Null when the engine gave no answer (or Google showed no AI Overview). */
-  answerMarkdown: string | null;
-  /** Plain prose for brand matching; empty without an answer. */
-  answerText: string;
-  citations: AiCitation[];
-  collectedAt: string | null;
-}
+import type { AiCitation, ParsedAiAnswer } from "../contracts/ai-answer";
 
 /**
  * Normalize one DataForSEO task result. No URL fetches or model calls: all

@@ -1,3 +1,5 @@
+import { resolveProviderReference } from "@/server/providers/resolver";
+import { AppError } from "@/server/lib/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkflowStep } from "cloudflare:workers";
 import { RankCheckWorkflow } from "./RankCheckWorkflow";
@@ -19,6 +21,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("cloudflare:workers", () => ({
   WorkflowEntrypoint: vi.fn(),
+}));
+vi.mock("@/server/providers/resolver", () => ({
+  resolveProviderReference: vi.fn(async (organizationId: string) => ({
+    organizationId,
+    provider: "dataforseo",
+    revision: 0,
+    credentialVersion: null,
+  })),
 }));
 vi.mock("cloudflare:workflows", () => ({
   NonRetryableError: class extends Error {},
@@ -112,6 +122,20 @@ describe("rank check workflow credit ceiling", () => {
     mocks.updateRun.mockResolvedValue(undefined);
     mocks.isHostedServerAuthMode.mockResolvedValue(true);
     mocks.autumnCheck.mockResolvedValue({ balance: { remaining: 1_000 } });
+  });
+
+  it("marks the run failed when provider configuration cannot be resolved", async () => {
+    vi.mocked(resolveProviderReference).mockRejectedValueOnce(
+      new AppError("SEO_PROVIDER_NOT_CONFIGURED"),
+    );
+    await expect(runWorkflow({})).rejects.toMatchObject({
+      code: "SEO_PROVIDER_NOT_CONFIGURED",
+    });
+    expect(mocks.failRunIfActive).toHaveBeenCalledWith(
+      "run_1",
+      "SEO_PROVIDER_NOT_CONFIGURED",
+    );
+    expect(mocks.runLiveCheck).not.toHaveBeenCalled();
   });
 
   it("rejects a keyword-list race before balance or DataForSEO calls", async () => {

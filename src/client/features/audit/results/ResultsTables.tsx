@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-table";
 import { Link } from "@tanstack/react-router";
 import { Badge } from "@/client/components/ui/badge";
+import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import { Button } from "@/client/components/ui/button";
 import { DataTable, useDataTable } from "@/client/components/table/DataTable";
 import { SortableHeader } from "@/client/components/table/SortableHeader";
@@ -143,8 +144,12 @@ function buildPerformanceColumns({
       header: ({ column }) => <SortableHeader column={column} label="Status" />,
       cell: ({ row }) => {
         const isFailed = isLighthouseFailure(row.original);
-        const failureMessage =
-          row.original.errorMessage ?? "Lighthouse returned no category scores";
+        const failureMessage = getStandardErrorMessage(
+          new Error(
+            row.original.errorMessage ??
+              "Lighthouse returned no category scores",
+          ),
+        );
         return isFailed ? (
           <Badge variant="destructive" title={failureMessage}>
             failed
